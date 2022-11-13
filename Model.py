@@ -70,7 +70,7 @@ def SE_ResNet(input):
     #stage4
     x = SE_block(x,512,16,True)
     x = GlobalAveragePooling1D(keepdims = True)(x)
-    #x = Dense(SLE_dim,activation = "relu")(x)
+    x = Dense(32,activation = "relu")(x)
     return x
 
 #create MODEL
