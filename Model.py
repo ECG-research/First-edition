@@ -5,11 +5,11 @@ from keras.activations import sigmoid
 from keras.models import Model
 from keras import Input, optimizers
 import tensorflow as tf
-
+#qqqq
 #create TRANSFORMER
 def add_position(input,num_lead):
     input_pos_encoding = tf.constant(num_lead, shape=input.shape, dtype="int32")/10
-    input_pos_encoding = tf.cast(tf.reshape(input_pos_encoding, input.shape),tf.float32)
+    input_pos_encoding = tf.cast(input_pos_encoding,tf.float32)
     input = tf.add(input ,input_pos_encoding)
     return input
 def transformer_encoder(input,key_dim,num_heads,dropout):
