@@ -12,6 +12,10 @@ def add_position(input,num_lead):
     input_pos_encoding = tf.cast(input_pos_encoding,tf.float32)
     input = tf.add(input ,input_pos_encoding)
     return input
+def add_position_temporal(input,key_dim):
+    input_pos_encoding = np.array([i/50 for i in range(0,key_dim,1)])
+    input = tf.add(input ,np.reshape(input_pos_encoding,input.shape))
+    return input
 def transformer_encoder(input,key_dim,num_heads,dropout):
     # Normalization and Attention
     x = LayerNormalization(epsilon=1e-6)(input)
@@ -29,6 +33,7 @@ def stack_block_transformer(key_dim,num_transformer_blocks,dropout):
     input = Input(shape=(1, key_dim))
     x = input
     for _ in range(num_transformer_blocks):
+        x = add_position_temporal(x,key_dim) #add temporal position
         x = transformer_encoder(x,key_dim,num_heads = 2,dropout = dropout)
     return input, x
 
@@ -87,7 +92,7 @@ def Proposed_model(key_dim,num_lead,num_class):
     for i in range(1,num_lead):
         input_i, transformer_i = stack_block_transformer(num_transformer_blocks)
         inputs.append(input_i) 
-        transformer_i = add_position(transformer_i,i)
+        transformer_i = add_position(transformer_i,i) #add spatial position b4 se-resnet
         transformers.append(transformer_i)
     #spatial feature
     x = Concatenate(transformers, axis=-1)
