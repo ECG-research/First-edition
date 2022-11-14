@@ -1,20 +1,16 @@
 import numpy as np
 # import pandas as pd
-from keras.layers import Convolution1D, Add, Concatenate, MaxPooling1D, MultiHeadAttention, Dropout, LayerNormalization, Dense, Flatten, GlobalAveragePooling1D, ReLU
+from keras.layers import Convolution1D, Add, concatenate, Concatenate, MaxPooling1D, MultiHeadAttention, Dropout, LayerNormalization, Dense, Flatten, GlobalAveragePooling1D, ReLU
 from keras.activations import sigmoid
 from keras.models import Model
 from keras import Input, optimizers
 import tensorflow as tf
 
 #create TRANSFORMER
-def add_position(input,num_lead):
-    input_pos_encoding = tf.constant(num_lead, shape=input.shape, dtype="int32")/10
-    input_pos_encoding = tf.cast(input_pos_encoding,tf.float32)
+def add_position_spatial(input,num_lead):
+    input_pos_encoding = tf.constant(num_lead, shape=[input.shape[2]], dtype="int32")
+    input_pos_encoding = tf.cast(tf.reshape(input_pos_encoding, [1,input.shape[2]]),tf.float32)
     input = tf.add(input ,input_pos_encoding)
-    return input
-def add_position_temporal(input,key_dim):
-    input_pos_encoding = np.array([i/50 for i in range(0,key_dim,1)])
-    input = tf.add(input ,np.reshape(input_pos_encoding,input.shape))
     return input
 def transformer_encoder(input,key_dim,num_heads,dropout):
     # Normalization and Attention
@@ -30,10 +26,9 @@ def transformer_encoder(input,key_dim,num_heads,dropout):
     x = Dense(key_dim, activation='relu')(x)
     return x + res
 def stack_block_transformer(key_dim,num_transformer_blocks,dropout):
-    input = Input(shape=(1, key_dim))
+    input = Input(shape=(1,key_dim))
     x = input
     for _ in range(num_transformer_blocks):
-        x = add_position_temporal(x,key_dim) #add temporal position
         x = transformer_encoder(x,key_dim,num_heads = 2,dropout = dropout)
     return input, x
 
@@ -83,24 +78,25 @@ def Proposed_model(key_dim,num_lead,num_class):
     #hyperparameter
     num_transformer_blocks = 2
     #initialize first input
-    input_, transformer_ = stack_block_transformer(key_dim,num_transformer_blocks,0,1)
+    input_, transformer_ = stack_block_transformer(key_dim,num_transformer_blocks,0.1)
     inputs = []
     transformers = []
     transformers.append(transformer_)
     inputs.append(input_)
     #stack transformers
     for i in range(1,num_lead):
-        input_i, transformer_i = stack_block_transformer(num_transformer_blocks)
+        input_i, transformer_i = stack_block_transformer(key_dim,num_transformer_blocks,0.1)
         inputs.append(input_i) 
-        transformer_i = add_position(transformer_i,i) #add spatial position b4 se-resnet
+        transformer_i = add_position_spatial(transformer_i,i) #add spatial position b4 se-resnet
         transformers.append(transformer_i)
     #spatial feature
-    x = Concatenate(transformers, axis=-1)
-    x = tf.expand_dims(x, axis = 0)
+    x = concatenate(transformers, axis=-1)
+    x = tf.expand_dims(x, axis = -1)
+    x = tf.squeeze(x, axis = 1)
     feature = SE_ResNet(x)
 
     #metadata encoding 
-    metadata = Input(shape= feature.shape)
+    metadata = Input(shape= feature.shape[1:])
 
     #attention architecture
     feature1 = MultiHeadAttention(num_heads=2, key_dim= 512)(metadata,feature)
