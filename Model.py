@@ -3,6 +3,7 @@ import numpy as np
 from keras.layers import Convolution1D, Add, concatenate, Concatenate, MaxPooling1D, MultiHeadAttention, Dropout, LayerNormalization, Dense, Flatten, GlobalAveragePooling1D, ReLU
 from keras.activations import sigmoid
 from keras.models import Model
+from keras.losses import BinaryCrossentropy
 from keras import Input, optimizers
 import tensorflow as tf
 
@@ -62,7 +63,7 @@ def SE_ResNet(input):
     x = Convolution1D(64,15,2,padding="valid")(input)
     x = MaxPooling1D(3,2,padding="valid")(x)
     #stage1
-    x = SE_block(x,64,16)
+    x = SE_block(x,64,16,True)
     #stage2
     x = SE_block(x,128,16,True)
     #stage3
@@ -70,7 +71,7 @@ def SE_ResNet(input):
     #stage4
     x = SE_block(x,512,16,True)
     x = GlobalAveragePooling1D(keepdims = True)(x)
-    x = Dense(32,activation = "relu")(x)
+    #x = Dense(32,activation = "relu")(x)
     return x
 
 #create MODEL
@@ -96,13 +97,13 @@ def Proposed_model(key_dim,num_lead,num_class):
     feature = SE_ResNet(x)
 
     #metadata encoding 
-    metadata = Input(shape= feature.shape[1:])
-
+    metadata = Input(shape= (1,32))
+    metadata1 = Dense(512,activation="relu")(metadata)
     #attention architecture
-    feature1 = MultiHeadAttention(num_heads=2, key_dim= 512)(metadata,feature)
+    feature1 = MultiHeadAttention(num_heads=2, key_dim= 256)(metadata1,feature)
     feature1 = Add()([feature,feature1])
-    feature2 = MultiHeadAttention(num_heads=2, key_dim= 512)(feature,metadata)
-    feature2 = Add()([metadata,feature2])
+    feature2 = MultiHeadAttention(num_heads=2, key_dim= 256)(feature,metadata1)
+    feature2 = Add()([metadata1,feature2])
     feature = Concatenate()([feature1,feature2])
     #classify
     feature = LayerNormalization(epsilon=1e-6)(feature)
@@ -111,11 +112,13 @@ def Proposed_model(key_dim,num_lead,num_class):
     prediction = Dense(num_class,activation="sigmoid")(feature)
     #optimizer
     model = Model([inputs,metadata],prediction)
+    loss = BinaryCrossentropy()
     opt = optimizers.Adagrad(learning_rate=0.001)
     model.compile(
-        loss="binary_crossentropy",
+        loss=loss,
         optimizer=opt,
         metrics=["accuracy"]
         )
     print(model.summary)
     return model
+#model = Proposed_model(1000,3,5)
