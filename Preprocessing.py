@@ -8,18 +8,22 @@ path = "First-edition\\"
 sampling_rate = 100
 
 class Preprocessing():
-    def __init__(self,path,sampling_rate):
+    def __init__(self,path,sampling_rate,experiment = 'diagnostic_superclass'):
+        self.experiment = experiment
         self.path = path
         self.sampling_rate = sampling_rate
         self.csv_file = pd.read_csv(path+'ptbxl_database.csv',index_col = 'ecg_id')
         self.csv_file.scp_codes = self.csv_file.scp_codes.apply(lambda x: ast.literal_eval(x))
         X = self.load_raw_data(self.csv_file, self.sampling_rate, self.path)
+        self.num_of_class = 5
+        if (self.experiment == 'diagnostic_subclass'):
+            self.num_of_class = 23
 
         self.agg_df = pd.read_csv(path+'scp_statements.csv', index_col=0)
         self.agg_df = self.agg_df[self.agg_df.diagnostic == 1]
         # Apply diagnostic superclass
         self.csv_file['diagnostic_superclass'] = self.csv_file.scp_codes.apply(self.aggregate_diagnostic)
-
+        self.csv_file['diagnostic_subclass'] = self.csv_file.scp_codes.apply(self.aggregate_subdiagnostic)
         # Split data into train and test
         self.test_fold = 10
         self.val_fold = 9
@@ -35,34 +39,41 @@ class Preprocessing():
 
         #one hot coding for y
         self.y = np.zeros((21799,5))
-        l1 = ['NORM' in i for i in self.csv_file.diagnostic_superclass]
-        l2 = ['MI' in i for i in self.csv_file.diagnostic_superclass]
-        l3 = ['HYP' in i for i in self.csv_file.diagnostic_superclass]
-        l4 = ['STTC' in i for i in self.csv_file.diagnostic_superclass]
-        l5 = ['CD' in i for i in self.csv_file.diagnostic_superclass]
-        self.y[l1,0] = 1
-        self.y[l2,1] = 1
-        self.y[l3,2] = 1
-        self.y[l4,3] = 1
-        self.y[l5,4] = 1
+        if (self.experiment == "diagnostic_superclass"):
+            l1 = ['NORM' in i for i in self.csv_file.diagnostic_superclass]
+            l2 = ['MI' in i for i in self.csv_file.diagnostic_superclass]
+            l3 = ['HYP' in i for i in self.csv_file.diagnostic_superclass]
+            l4 = ['STTC' in i for i in self.csv_file.diagnostic_superclass]
+            l5 = ['CD' in i for i in self.csv_file.diagnostic_superclass]
+            self.y[l1,0] = 1
+            self.y[l2,1] = 1
+            self.y[l3,2] = 1
+            self.y[l4,3] = 1
+            self.y[l5,4] = 1
+        elif (self.experiment == "diagnostic_subclass"):
+            self.y = np.zeros((21799,23))
+            self.l = ['_AVB','AMI','CLBBB','CRBBB','ILBBB','IMI','IRBBB','ISC_','ISCA','ISCI','IVCD','LAFB/LPFB','LAO/LAE','LMI','LVH','NORM','NST_','PMI','RAO/RAE','RVH','SEHYP','STTC','WPW']
+            for j in range(23):
+                l_j = [self.l[j] in i for i in self.csv_file.diagnostic_subclass]
+                self.y[l_j, j] = 1
 
         #meta_sle 
         self.X_train = X[np.where(self.csv_file.strat_fold <= 8)]
         self.y_train = self.y[np.where(self.csv_file.strat_fold <= 8)]
-        self.y_train = np.reshape(self.y_train,(-1,1,5))
+        self.y_train = np.reshape(self.y_train,(-1,1,self.num_of_class))
         self.sle_train = self.meta_sle[np.where(self.csv_file.strat_fold <= 8)]
         self.sle_train = np.reshape(self.sle_train,(-1,1,32))
 
         #extract data
         self.X_val = X[np.where(self.csv_file.strat_fold == 9)]
         self.y_val = self.y[np.where(self.csv_file.strat_fold == 9)]
-        self.y_val = np.reshape(self.y_val,(-1,1,5))
+        self.y_val = np.reshape(self.y_val,(-1,1,self.num_of_class))
         self.sle_val = self.meta_sle[np.where(self.csv_file.strat_fold == 9)]
         self.sle_val = np.reshape(self.sle_val,(-1,1,32))
 
         self.X_test = X[np.where(self.csv_file.strat_fold == 10)]
         self.y_test = self.y[np.where(self.csv_file.strat_fold == 10)]
-        self.y_test = np.reshape(self.y_test,(-1,1,5))
+        self.y_test = np.reshape(self.y_test,(-1,1,self.num_of_class))
         self.sle_test = self.meta_sle[np.where(self.csv_file.strat_fold == 10)]
         self.sle_test = np.reshape(self.sle_test,(-1,1,32))
 
@@ -88,6 +99,14 @@ class Preprocessing():
             if key in self.agg_df.index:
                 tmp.append(self.agg_df.loc[key].diagnostic_class)
         return list(set(tmp))
+
+    def aggregate_subdiagnostic(self,y_dic):
+        tmp = []
+        for key in y_dic.keys():
+            if key in self.agg_df.index:
+                tmp.append(self.agg_df.loc[key].diagnostic_subclass)
+        return list(set(tmp))
+
 
     #reshape dataset as model dimention for input
     def split_reshape(self,input):
