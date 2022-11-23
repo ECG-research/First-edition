@@ -3,10 +3,13 @@ import torch.optim as optim
 import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
 import numpy as np
-# import xResNet as m
-import Inception1d as m
 import Preprocessing as P
 from tqdm import tqdm
+import matplotlib.pyplot as plt
+
+########### import model ############
+# import xResNet as m
+import Inception1d as m
 
 #hyperparameters
 path = ""
@@ -45,7 +48,10 @@ train_data = DataLoader(TensorDataset(x_train,y_train), batch_size=200, shuffle=
 val_data = DataLoader(TensorDataset(x_val,y_val), batch_size = 200, shuffle=False)
 test_data = DataLoader(TensorDataset(x_test,y_test), batch_size = 200, shuffle=False)
 
-#train
+train_loss = []
+train_acc = []
+val_loss = []
+val_acc = []
 for epoch in tqdm(range(num_eporch)):
     net.train()
     print("Epoch {}:/n-----------------------------------------------------------".format(epoch +1)) 
@@ -59,12 +65,17 @@ for epoch in tqdm(range(num_eporch)):
         loss = criterion(outputs, labels.float())
         loss.backward()
         optimizer.step()
-
-        pred = outputs.detach().numpy() > thresh_hold
         
+        # calculate output accuracy
+        pred = outputs.detach().numpy() > thresh_hold
+        acc = (pred == labels.detach().numpy()).sum()/(inputs.shape[0]*5)
+        
+        # store loss
         running_loss += loss.item()
+        train_loss.append(loss.item())
+        train_acc.append(acc)
         print("epoch{}: loss per batch:{:.4f}".format(epoch+1, running_loss))
-        print("Accuracy of epoch{} per batch:{}".format(epoch+1, (pred == labels.detach().numpy()).sum()*100/(inputs.shape[0]*5)))
+        print("Accuracy of epoch{} per batch:{}".format(epoch+1, acc*100))
     with torch.no_grad():
         net.eval()
         running_loss = 0.0
@@ -73,12 +84,33 @@ for epoch in tqdm(range(num_eporch)):
         # forward + backward + optimize
         outputs = net(inputs.float())
         loss = criterion(outputs, labels.float())
-        
-        running_loss += loss.item()
+        # calculate output acc
         pred = outputs.detach().numpy() > thresh_hold
-        correct_val += (pred == labels.detach().numpy()).sum()
-        
-    print("Accuracy of epoch{}:{:}".format(epoch+1, correct_val*100/(y_val.shape[0]*5)))
+        acc = (pred == labels.detach().numpy()).sum()
+        correct_val += acc
+        #store loss
+        running_loss += loss.item()
+        val_loss.append(loss.item())
+        val_acc.append(acc)
+    print("========================================================")
+    print("Validation loss of epoch{}:{:.4f}".format(epoch+1,running_loss))
+    print("Accuracy of epoch{}:{}".format(epoch+1, correct_val*100/(y_val.shape[0]*5)))
 
-print("finished")
-    
+print("\nfinished training =================================================")
+
+#visualize
+figure, axis = plt.subplots(2)
+# training plot
+axis[0].plot(train_loss,label="loss")
+axis[0].plot(train_acc,label="acc")
+axis[0].set_title("train data")
+# validation plot
+axis[1].plot(val_loss,label="loss")
+axis[1].plot(val_acc,label="acc")
+axis[1].set_title("validation data")
+
+plt.legend()
+plt.tight_layout()
+plt.show()
+
+
