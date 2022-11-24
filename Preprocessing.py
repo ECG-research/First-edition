@@ -57,7 +57,8 @@ class Preprocessing():
                 l_j = [self.l[j] in i for i in self.csv_file.diagnostic_subclass]
                 self.y[l_j, j] = 1
 
-        #meta_sle 
+        #meta_sle
+        #if using the baseline models, please reshape y_train,y_val and y_test into (-1,self.num_of_class)
         self.X_train = X[np.where(self.csv_file.strat_fold <= 8)]
         self.y_train = self.y[np.where(self.csv_file.strat_fold <= 8)]
         self.y_train = np.reshape(self.y_train,(-1,1,self.num_of_class))
