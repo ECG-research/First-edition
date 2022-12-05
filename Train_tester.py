@@ -14,9 +14,9 @@ from sklearn.metrics import f1_score, average_precision_score
 # import Inception1d as m
 import Modified_model1 as m
 #hyperparameters
-path = ""
+path = "/home/ubuntu/Tue.CM210908/data/physionet.org/files/ptb-xl/1.0.3/"
 sampling_rate = 100
-num_eporch = 40
+num_eporch = 1
 thresh_hold = 0.1
 
 #network
@@ -66,6 +66,8 @@ val_auc = []
 for epoch in tqdm(range(num_eporch)):
     net.train()
     print("Epoch {}:/n-----------------------------------------------------------".format(epoch +1)) 
+    if epoch%10 == 6:
+            scheduler.step()
     
     for input1, input2, input3, metadata, labels in tqdm(train_data):
         running_loss = 0.0
@@ -76,8 +78,6 @@ for epoch in tqdm(range(num_eporch)):
         loss = criterion(outputs, labels.float())
         loss.backward()
         optimizer.step()
-        if epoch%10 == 6:
-            scheduler.step()
         
         # calculate output accuracy and f1 score
         # score = f1(outputs,labels)
@@ -135,7 +135,7 @@ axis[1].set_title("loss")
 
 axis[2].plot(val_auc,label="val")
 axis[2].plot(train_auc,label="train")
-axis[2].set_title("auc")
+# axis[2].set_title("auc")
 
 plt.legend()
 plt.tight_layout()
@@ -149,10 +149,12 @@ with torch.no_grad():
     net.eval()
     running_loss = 0.0
     batch_test = []
-    for inputs, labels in tqdm(test_data):
-        outputs = net(inputs.float())
+    for input1, input2, input3, metadata, labels in tqdm(val_data):
+        # forward + backward + optimize
+        outputs = net(input1.float(),input2.float(),input3.float(),metadata.float())
         loss = criterion(outputs, labels.float())
-
+        # calculate output acc
+        # score = f1(outputs,labels)
         pred = outputs.detach().numpy() > thresh_hold
         labels = labels.detach().numpy()
         score = f1_score(labels,pred,average=None)
