@@ -63,6 +63,17 @@ class InceptionBackbone(nn.Module):
                 x = (self.sk[d//3])(input_res, x)
                 input_res = x.clone()
         return x
+class Cross_attention(nn.Module):
+    def __init__(self,query_dim,num_head=2,dropout = 0.1,batch_first= True):
+        super().__init__()
+        self.layers = nn.ModuleList([nn.MultiheadAttention(query_dim,num_heads=num_head,dropout=dropout,
+                    batch_first=batch_first) for i in range(2)])
+    def forward(self,query0,query1):
+        feature0 = self.layers[0](query0,query1,query1)[0]
+        feature0 = torch.add(feature0,query0)
+        feature1 = self.layers[1](query1,query0,query0)[0]
+        feature1 = torch.add(feature1,query1)
+        return torch.cat((feature1,feature0),dim = -1)
 
 class Modified_version(nn.Module):
     '''inception time architecture'''
@@ -72,35 +83,34 @@ class Modified_version(nn.Module):
         assert(kernel_size>=40)
         kernel_size = [k-1 if k%2==0 else k for k in [kernel_size,kernel_size//2,kernel_size//4]] #was 39,19,9
         self.num_leads = num_leads
-        #inceptiontime layers depth = depth
-        self.Incep_layers = [InceptionBackbone(input_channels=input_channels, kss=kernel_size, depth=depth, bottleneck_size=bottleneck_size, 
-                nb_filters=nb_filters, use_residual=use_residual) for i in range(num_leads)]
         #hyperpara
         self.n_ks = len(kernel_size) + 1
         self.bottleneck_size = bottleneck_size
+        #inceptiontime layers depth = depth
+        self.Incep_layers = nn.ModuleList([InceptionBackbone(input_channels=input_channels, kss=kernel_size, depth=depth, bottleneck_size=bottleneck_size, 
+                nb_filters=nb_filters, use_residual=use_residual) for i in range(num_leads)])
+        self.Incep_layers.append(nn.Linear(32,self.num_leads*self.n_ks*self.bottleneck_size)) # for metadata
+        #MHA
+        self.MHA = Cross_attention(self.num_leads*self.n_ks*self.bottleneck_size)
         #classify layers
         layers = []
         layers.append(nn.Flatten())
         layers.append(nn.Linear(2*self.num_leads*self.n_ks*self.bottleneck_size,num_classes))
         self.layers = nn.Sequential(*layers)
     def forward(self,x0,x1,x2,metadata):
-        feature = [self.Incep_layers[0](x0),
-                    self.Incep_layers[1](x1),
-                    self.Incep_layers[2](x2)]
-        feature = torch.cat(feature,dim= 1)
+        x0 = self.Incep_layers[0](x0)
+        x1 = self.Incep_layers[1](x1)
+        x2 = self.Incep_layers[2](x2)
+        metadata = self.Incep_layers[3](metadata) #project to embedding space
+
+        feature = torch.cat([x0,x1,x2],dim= 1)
         feature = nn.AdaptiveAvgPool1d(1)(feature) #match the dim of metadata
-        feature = torch.reshape(feature, (-1,1,self.num_leads*self.n_ks*self.bottleneck_size)) #change to the required shape for MHAttention
+        feature = torch.reshape(feature, (-1,1,self.num_leads*self.n_ks*self.bottleneck_size)) #the required shape for MHAttention
         #multiple head attention
-        metadata = nn.Linear(32,384)(metadata)
-        feature1 = self.MHAttention(feature,metadata,metadata)
-        feature2 = self.MHAttention(metadata,feature,feature)
-        enhanced_feature = torch.cat((feature1,feature2),dim=-1)
+        enhanced_feature = self.MHA(feature,metadata)
         #classify
         return self.layers(enhanced_feature)
-    def MHAttention(self,query,key,value,num_head=2,dropout = 0.1,batch_first = True):
-        x = nn.MultiheadAttention(query.shape[-1],num_heads=num_head,dropout=dropout,batch_first=batch_first)(query,key,value,need_weights = False)
-        x = x[0]
-        return torch.add(x,query)
+
 #create model
 def modified_version(**kwargs):
     return Modified_version(**kwargs)
