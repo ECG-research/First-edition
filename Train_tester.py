@@ -16,13 +16,19 @@ import Modified_model1 as m
 #hyperparameters
 path = "/home/ubuntu/Tue.CM210908/data/physionet.org/files/ptb-xl/1.0.3/"
 sampling_rate = 100
-num_eporch = 1
+num_eporch = 50
 thresh_hold = 0.1
+
+if torch.cuda.is_available(): 
+    dev = "cuda:0" 
+else: 
+    dev = "cpu" 
+device = torch.device(dev)
 
 #network
 # net = m.inception1d().float()
 # net = m.xresnet1d101_deeper().float() #could be other types of xresnet, see xResNet.py for more info
-net = m.modified_version().float()
+net = m.modified_version().float().to(device)
 
 #initialize criterion, optimizer
 criterion = nn.functional.binary_cross_entropy_with_logits
@@ -63,6 +69,8 @@ train_auc = []
 val_loss = []
 val_acc = []
 val_auc = []
+val_score = []
+val_score_all = []
 for epoch in tqdm(range(num_eporch)):
     net.train()
     print("Epoch {}:/n-----------------------------------------------------------".format(epoch +1)) 
@@ -72,18 +80,20 @@ for epoch in tqdm(range(num_eporch)):
     for input1, input2, input3, metadata, labels in tqdm(train_data):
         running_loss = 0.0
         optimizer.zero_grad()
+        input1, input2, input3, metadata, labels = input1.to(device), input2.to(device), input3.to(device), metadata.to(device), labels.to(device)
 
         # forward + backward + optimize
         outputs = net(input1.float(),input2.float(),input3.float(),metadata.float())
+        outputs.to(device)
         loss = criterion(outputs, labels.float())
         loss.backward()
         optimizer.step()
         
         # calculate output accuracy and f1 score
         # score = f1(outputs,labels)
-        pred = outputs.detach().numpy() > thresh_hold
-        labels = labels.detach().numpy()
-        score = f1_score(labels,pred,average=None)
+        pred = outputs.cpu().detach().numpy() > thresh_hold
+        labels = labels.cpu().detach().numpy()
+        score = f1_score(labels,pred,average='macro')
         area = auc(labels,pred)
         acc = (pred == labels).sum()/(input1.shape[0]*5)
         
@@ -99,14 +109,16 @@ for epoch in tqdm(range(num_eporch)):
         net.eval()
         running_loss = 0.0
         for input1, input2, input3, metadata, labels in tqdm(val_data):
+            input1, input2, input3, metadata, labels = input1.to(device), input2.to(device), input3.to(device), metadata.to(device), labels.to(device)
             # forward + backward + optimize
-            outputs = net(input1.float(),input2.float(),input3.float(),metadata.float())
+            outputs = net(input1.float(),input2.float(),input3.float(),metadata.float())            
+            outputs.to(device)
             loss = criterion(outputs, labels.float())
             # calculate output acc
             # score = f1(outputs,labels)
-            pred = outputs.detach().numpy() > thresh_hold
-            labels = labels.detach().numpy()
-            score = f1_score(labels,pred,average=None)
+            pred = outputs.cpu().detach().numpy() > thresh_hold
+            labels = labels.cpu().detach().numpy()
+            score = f1_score(labels,pred,average='macro')
             area = auc(labels,pred)
             acc = (pred == labels).sum()/(input1.shape[0]*5)
             #store loss
@@ -114,10 +126,13 @@ for epoch in tqdm(range(num_eporch)):
             val_loss.append(loss.item())
             val_auc.append(area)
             val_acc.append(acc)
+            val_score.append(score)
+        t = sum(val_score)/len(val_score)
         print("========================================================")
-        print("Validation loss of epoch{}:{:.4f}".format(epoch+1,running_loss))
-        print("Accuracy of epoch{}:{}".format(epoch+1, acc*100))
-        print("F1 score of epoch{}:{}".format(epoch+1,score))
+        print("Validation loss of epoch{}:{:.4f}".format(epoch+1,sum(val_loss)/len(val_loss)))
+        print("Accuracy of epoch{}:{}".format(epoch+1, sum(val_acc)/len(val_acc)*100))
+        print("F1 score of epoch{}:{}".format(epoch+1,t))
+        val_score_all.append(t)
 
 
 print("\nfinished training =================================================")
@@ -150,14 +165,16 @@ with torch.no_grad():
     running_loss = 0.0
     batch_test = []
     for input1, input2, input3, metadata, labels in tqdm(val_data):
+        input1, input2, input3, metadata, labels = input1.to(device), input2.to(device), input3.to(device), metadata.to(device), labels.to(device)
         # forward + backward + optimize
-        outputs = net(input1.float(),input2.float(),input3.float(),metadata.float())
+        outputs = net(input1.float(),input2.float(),input3.float(),metadata.float()) 
+        outputs.to(device)
         loss = criterion(outputs, labels.float())
         # calculate output acc
         # score = f1(outputs,labels)
-        pred = outputs.detach().numpy() > thresh_hold
-        labels = labels.detach().numpy()
-        score = f1_score(labels,pred,average=None)
+        pred = outputs.cpu().detach().numpy() > thresh_hold
+        labels = labels.cpu().detach().numpy()
+        score = f1_score(labels,pred,average='macro')
         area = auc(labels,pred)
         acc = (pred == labels).sum()/(input1.shape[0]*5)
         
@@ -168,4 +185,6 @@ with torch.no_grad():
         test_acc.append(acc)
 print("========================================================")
 print("Test loss:{:.4f}".format(sum(test_loss)/len(test_loss)))    
-print("Test accuracy:{:}".format(sum(batch_test)/len(batch_test)))
+print("Test accuracy:{:}".format(sum(batch_test)/len(batch_test)*100))
+print("F1 score:{}".format(score))
+print("VAL_score:{}".format(val_score_all))
