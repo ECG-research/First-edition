@@ -2,8 +2,7 @@ import numpy as np
 import wfdb
 import pandas as pd
 import ast
-import Model as M
-import tensorflow as tf
+
 path = "First-edition\\"
 sampling_rate = 100
 
@@ -36,6 +35,41 @@ class Preprocessing():
             self.meta_sle[np.logical_and(np.array(self.csv_file.height)>=(100+10*i), np.array(self.csv_file.height)<(110+10*i)), 2+i] = 1 #height encoding
             self.meta_sle[np.logical_and(np.array(self.csv_file.weight)>=(0+12*i), np.array(self.csv_file.weight)<(12+12*i)), 12+i] = 1 #weight encoding
             self.meta_sle[np.logical_and(np.array(self.csv_file.age)>=(0+10*i), np.array(self.csv_file.age)<(10+10*i)), 22+i] = 1 #age encoding
+        self.meta_sle[self.csv_file.age == 300, 31] = 1
+
+        #uncomment the following block for SLE
+
+        # def check_not_empty(metadata):
+        #     bool1 = 1 in metadata[2:11]
+        #     bool2 = 1 in metadata[12:21]
+        #     return [bool1, bool2]
+
+        # def fill_noise(metadata):
+        #     bool = check_not_empty(metadata)
+        #     male_height =   [0,7,7,7,7,7,7,7,7,7]
+        #     female_height = [1,6,6,6,6,6,6,6,6,5]
+        #     male_weight =   [1,6,6,6,6,6,6,6,5,5]
+        #     female_weight = [1,5,5,5,5,5,5,5,4,4]
+        #     if not bool[0]:
+        #         if metadata[0] == 1:
+        #             l = female_height
+        #         else: l = male_height
+        #         for i in range(22,32):
+        #             if metadata[i] == 1:
+        #                 break
+        #         metadata[l[i-22]+2] = 1
+        #     if not bool[1]:
+        #         if metadata[0] == 1:
+        #             l2 = female_weight
+        #         else: l2 = male_weight
+        #         for j in range(22,32): #age indicator
+        #             if metadata[j] == 1:
+        #                 break
+        #         metadata[l2[j-22]+12] = 1
+        #     return metadata        
+
+        # for i in range(21799):
+        #     self.meta_sle[i] = fill_noise(self.meta_sle[i])
 
         #one hot coding for y
         self.y = np.zeros((21799,5))
@@ -61,20 +95,20 @@ class Preprocessing():
         #if using the baseline models, please reshape y_train,y_val and y_test into (-1,self.num_of_class)
         self.X_train = X[np.where(self.csv_file.strat_fold <= 8)]
         self.y_train = self.y[np.where(self.csv_file.strat_fold <= 8)]
-        self.y_train = np.reshape(self.y_train,(-1,1,self.num_of_class))
+        self.y_train = np.reshape(self.y_train,(-1,self.num_of_class))
         self.sle_train = self.meta_sle[np.where(self.csv_file.strat_fold <= 8)]
         self.sle_train = np.reshape(self.sle_train,(-1,1,32))
 
         #extract data
         self.X_val = X[np.where(self.csv_file.strat_fold == 9)]
         self.y_val = self.y[np.where(self.csv_file.strat_fold == 9)]
-        self.y_val = np.reshape(self.y_val,(-1,1,self.num_of_class))
+        self.y_val = np.reshape(self.y_val,(-1,self.num_of_class))
         self.sle_val = self.meta_sle[np.where(self.csv_file.strat_fold == 9)]
         self.sle_val = np.reshape(self.sle_val,(-1,1,32))
 
         self.X_test = X[np.where(self.csv_file.strat_fold == 10)]
         self.y_test = self.y[np.where(self.csv_file.strat_fold == 10)]
-        self.y_test = np.reshape(self.y_test,(-1,1,self.num_of_class))
+        self.y_test = np.reshape(self.y_test,(-1,self.num_of_class))
         self.sle_test = self.meta_sle[np.where(self.csv_file.strat_fold == 10)]
         self.sle_test = np.reshape(self.sle_test,(-1,1,32))
 
