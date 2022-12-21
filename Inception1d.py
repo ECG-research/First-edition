@@ -69,28 +69,50 @@ class InceptionBackbone(nn.Module):
                 input_res = x.clone()
         return x
 
+class Cross_attention(nn.Module):
+    def __init__(self,query_dim,num_head=2,dropout = 0.1,batch_first= True):
+        super().__init__()
+        self.layers = nn.ModuleList([nn.MultiheadAttention(query_dim,num_heads=num_head,dropout=dropout,
+                    batch_first=batch_first) for i in range(2)])
+    def forward(self,query0,query1):
+        feature0 = self.layers[0](query0,query1,query1)[0]
+        feature0 = torch.add(feature0,query0)
+        feature1 = self.layers[1](query1,query0,query0)[0]
+        feature1 = torch.add(feature1,query1)
+        return torch.cat((feature1,feature0),dim = -1)
+
 class Inception1d(nn.Module):
     '''inception time architecture'''
     def __init__(self, num_classes=5, input_channels=3, kernel_size=40, depth=6, bottleneck_size=32, nb_filters=32, use_residual=True,lin_ftrs_head=None, ps_head=0.5, bn_final_head=False, bn_head=True, act_head="relu", concat_pooling=True):
         super().__init__()
         assert(kernel_size>=40)
         kernel_size = [k-1 if k%2==0 else k for k in [kernel_size,kernel_size//2,kernel_size//4]] #was 39,19,9
+        n_ks = len(kernel_size) + 1
         
         layers = [InceptionBackbone(input_channels=input_channels, kss=kernel_size, depth=depth, bottleneck_size=bottleneck_size, nb_filters=nb_filters, use_residual=use_residual)]
-       
-        n_ks = len(kernel_size) + 1
+        layers.append(nn.AdaptiveAvgPool1d(1))
+        self.layers = nn.Sequential(*layers)
+
+        self.meta = nn.Linear(32,n_ks*bottleneck_size)
+        self.MHA = Cross_attention(128)
+
+        classify = [nn.Flatten()]
+        classify.append(nn.Linear(2*n_ks*bottleneck_size,num_classes))
+        self.classify = nn.Sequential(*classify)
         #head
         # head = create_head1d(n_ks*nb_filters, nc=num_classes, lin_ftrs=lin_ftrs_head, ps=ps_head, bn_final=bn_final_head, bn=bn_head, act=act_head, concat_pooling=concat_pooling)
         # layers.append(head)
-        layers.append(AdaptiveConcatPool1d())
-        layers.append(Flatten())
-        layers.append(nn.Linear(2*n_ks*nb_filters, num_classes))
-        self.layers = nn.Sequential(*layers)
+        # layers.append(AdaptiveConcatPool1d())
+        # layers.append(Flatten())
+        # layers.append(nn.Linear(2*n_ks*nb_filters, num_classes))
+        # self.layers = nn.Sequential(*layers)
 
-    def forward(self,x):
-        x= self.layers(x)
-        # return torch.squeeze(nn.functional.sigmoid(x))
-        return torch.squeeze(x)
+    def forward(self,x, metadata):
+        x = self.layers(x)
+        x = torch.reshape(x, (-1,1,128))
+        metadata = self.meta(metadata)
+        feature=  self.MHA(x,metadata)
+        return self.classify(feature)
     
     def get_layer_groups(self):
         depth = self.layers[0].depth
