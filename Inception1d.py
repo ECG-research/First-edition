@@ -87,32 +87,34 @@ class Inception1d(nn.Module):
         super().__init__()
         assert(kernel_size>=40)
         kernel_size = [k-1 if k%2==0 else k for k in [kernel_size,kernel_size//2,kernel_size//4]] #was 39,19,9
-        n_ks = len(kernel_size) + 1
         
         layers = [InceptionBackbone(input_channels=input_channels, kss=kernel_size, depth=depth, bottleneck_size=bottleneck_size, nb_filters=nb_filters, use_residual=use_residual)]
-        layers.append(nn.AdaptiveAvgPool1d(1))
-        self.layers = nn.Sequential(*layers)
-
-        self.meta = nn.Linear(32,n_ks*bottleneck_size)
-        self.MHA = Cross_attention(128)
-
-        classify = [nn.Flatten()]
-        classify.append(nn.Linear(2*n_ks*bottleneck_size,num_classes))
-        self.classify = nn.Sequential(*classify)
+       
+        n_ks = len(kernel_size) + 1
+        self.n_ks = n_ks
+        self.bottleneck_size = bottleneck_size
+        self.input_channels = input_channels
         #head
         # head = create_head1d(n_ks*nb_filters, nc=num_classes, lin_ftrs=lin_ftrs_head, ps=ps_head, bn_final=bn_final_head, bn=bn_head, act=act_head, concat_pooling=concat_pooling)
         # layers.append(head)
-        # layers.append(AdaptiveConcatPool1d())
-        # layers.append(Flatten())
-        # layers.append(nn.Linear(2*n_ks*nb_filters, num_classes))
-        # self.layers = nn.Sequential(*layers)
+        linear = []
+        linear.append(nn.Flatten())
+        linear.append(nn.Linear(2*n_ks*nb_filters, num_classes))
+        self.linear = nn.Sequential(*linear)
+        self.layers = nn.Sequential(*layers)
+        #MHA
+        self.MHA = Cross_attention(128)
+        self.meta_embed = nn.Linear(32,128)
 
-    def forward(self,x, metadata):
+    def forward(self,x,metadata):
         x = self.layers(x)
-        x = torch.reshape(x, (-1,1,128))
-        metadata = self.meta(metadata)
-        feature=  self.MHA(x,metadata)
-        return self.classify(feature)
+        x = nn.AdaptiveAvgPool1d(1)(x) #+> 256,128,1
+        feature = torch.reshape(x, (-1,1,128))
+        metadata = self.meta_embed(metadata)
+        enhanced_feature = self.MHA(feature,metadata)
+
+        # return torch.squeeze(nn.functional.sigmoid(x))
+        return self.linear(enhanced_feature)
     
     def get_layer_groups(self):
         depth = self.layers[0].depth
