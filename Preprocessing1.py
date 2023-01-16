@@ -19,7 +19,7 @@ class Preprocessing():
         self.sampling_rate = sampling_rate
         self.csv_file = pd.read_csv(path+'ptbxl_database.csv',index_col = 'ecg_id')
         self.csv_file.scp_codes = self.csv_file.scp_codes.apply(lambda x: ast.literal_eval(x))
-        X = self.load_raw_data(self.csv_file, self.sampling_rate, self.path)
+        
         self.num_of_class = 5
         if (self.experiment == 'diagnostic_subclass'):
             self.num_of_class = 23
@@ -99,28 +99,33 @@ class Preprocessing():
 
         #meta_sle
         #if using the baseline models, please reshape y_train,y_val and y_test into (-1,self.num_of_class)
+
+        #có thể comment out đống này nếu đã có file X_train.npy
+        X = self.load_raw_data(self.csv_file, self.sampling_rate, self.path)
         self.X_train = X[np.where(self.csv_file.strat_fold <= 8)]
+        self.X_val = X[np.where(self.csv_file.strat_fold == 9)]
+        self.X_test = X[np.where(self.csv_file.strat_fold == 10)]
+        self.X_train = self.split_reshape(self.X_train)
+        self.X_val = self.split_reshape(self.X_val)
+        self.X_test = self.split_reshape(self.X_test)
+
         self.y_train = self.y[np.where(self.csv_file.strat_fold <= 8)]
         self.y_train = np.reshape(self.y_train,(-1,self.num_of_class))
         self.sle_train = self.meta_sle[np.where(self.csv_file.strat_fold <= 8)]
         self.sle_train = np.reshape(self.sle_train,(-1,1,32))
 
         #extract data
-        self.X_val = X[np.where(self.csv_file.strat_fold == 9)]
+        
         self.y_val = self.y[np.where(self.csv_file.strat_fold == 9)]
         self.y_val = np.reshape(self.y_val,(-1,self.num_of_class))
         self.sle_val = self.meta_sle[np.where(self.csv_file.strat_fold == 9)]
         self.sle_val = np.reshape(self.sle_val,(-1,1,32))
 
-        self.X_test = X[np.where(self.csv_file.strat_fold == 10)]
         self.y_test = self.y[np.where(self.csv_file.strat_fold == 10)]
         self.y_test = np.reshape(self.y_test,(-1,self.num_of_class))
         self.sle_test = self.meta_sle[np.where(self.csv_file.strat_fold == 10)]
         self.sle_test = np.reshape(self.sle_test,(-1,1,32))
 
-        self.X_train = self.split_reshape(self.X_train)
-        self.X_val = self.split_reshape(self.X_val)
-        self.X_test = self.split_reshape(self.X_test)
 
         # self.X_train = self.add_position_temporal(self.X_train)
         # self.X_val = self.add_position_temporal(self.X_val)
@@ -172,11 +177,15 @@ class Preprocessing():
     def get_data_x(self):
         return self.X_train,self.X_val,self.X_test
     
+    def get_fast_data_x(self):
+        return np.load("X_train.npy"),np.load("X_val.npy"),np.load("X_test.npy")
+    
     def get_data_cwt(self):
         return np.load("cwt_train.npy"), np.load("cwt_val.npy"), np.load("cwt_test.npy")
     
     def get_data_stft(self):
         return np.load("stft_train.npy"), np.load("stft_val.npy"), np.load("stft_test.npy")
+    
     def get_data_y(self):
         return self.y_train,self.y_val,self.y_test
     def get_data_metadata(self):
@@ -287,5 +296,9 @@ t sẽ cố xong nốt wigner-ville
 # xtrain = np.concatenate([xtrain[0],xtrain[1],xtrain[2]],axis=1)
 # xval = np.concatenate([xval[0],xval[1],xval[2]],axis=1)
 # xtest = np.concatenate([xtest[0],xtest[1],xtest[2]],axis=1)
+# np.save("X_train",xtrain)
+# np.save("X_val",xval)
+# np.save("X_test",xtest)
 # cwt_data(xtrain,xval,xtest)
 # stft_data(xtrain,xval,xtest)
+# print(xtrain.shape)
