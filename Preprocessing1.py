@@ -9,7 +9,8 @@ import io
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 import pywt
-path = "First-edition\\"
+
+path = "/home/ubuntu/Tue.CM210908/data/physionet.org/files/ptb-xl/1.0.3/"
 sampling_rate = 100
 
 class Preprocessing():
@@ -45,37 +46,37 @@ class Preprocessing():
 
         #uncomment the following block for SLE
 
-        # def check_not_empty(metadata):
-        #     bool1 = 1 in metadata[2:11]
-        #     bool2 = 1 in metadata[12:21]
-        #     return [bool1, bool2]
+        def check_not_empty(metadata):
+            bool1 = 1 in metadata[2:11]
+            bool2 = 1 in metadata[12:21]
+            return [bool1, bool2]
 
-        # def fill_noise(metadata):
-        #     bool = check_not_empty(metadata)
-        #     male_height =   [0,7,7,7,7,7,7,7,7,7]
-        #     female_height = [1,6,6,6,6,6,6,6,6,5]
-        #     male_weight =   [1,6,6,6,6,6,6,6,5,5]
-        #     female_weight = [1,5,5,5,5,5,5,5,4,4]
-        #     if not bool[0]:
-        #         if metadata[0] == 1:
-        #             l = female_height
-        #         else: l = male_height
-        #         for i in range(22,32):
-        #             if metadata[i] == 1:
-        #                 break
-        #         metadata[l[i-22]+2] = 1
-        #     if not bool[1]:
-        #         if metadata[0] == 1:
-        #             l2 = female_weight
-        #         else: l2 = male_weight
-        #         for j in range(22,32): #age indicator
-        #             if metadata[j] == 1:
-        #                 break
-        #         metadata[l2[j-22]+12] = 1
-        #     return metadata        
+        def fill_noise(metadata):
+            bool = check_not_empty(metadata)
+            male_height =   [0,7,7,7,7,7,7,7,7,7]
+            female_height = [1,6,6,6,6,6,6,6,6,5]
+            male_weight =   [1,6,6,6,6,6,6,6,5,5]
+            female_weight = [1,5,5,5,5,5,5,5,4,4]
+            if not bool[0]:
+                if metadata[0] == 1:
+                    l = female_height
+                else: l = male_height
+                for i in range(22,32):
+                    if metadata[i] == 1:
+                        break
+                metadata[l[i-22]+2] = 1
+            if not bool[1]:
+                if metadata[0] == 1:
+                    l2 = female_weight
+                else: l2 = male_weight
+                for j in range(22,32): #age indicator
+                    if metadata[j] == 1:
+                        break
+                metadata[l2[j-22]+12] = 1
+            return metadata        
 
-        # for i in range(21799):
-        #     self.meta_sle[i] = fill_noise(self.meta_sle[i])
+        for i in range(21799):
+            self.meta_sle[i] = fill_noise(self.meta_sle[i])
 
         #one hot coding for y
         self.y = np.zeros((21799,5))
@@ -112,24 +113,32 @@ class Preprocessing():
         self.y_train = self.y[np.where(self.csv_file.strat_fold <= 8)]
         self.y_train = np.reshape(self.y_train,(-1,self.num_of_class))
         self.sle_train = self.meta_sle[np.where(self.csv_file.strat_fold <= 8)]
-        self.sle_train = np.reshape(self.sle_train,(-1,1,32))
+        self.sle_train = np.reshape(self.sle_train,(-1,32,1))
 
-        #extract data
-        
+        self.y_train, index = self.remove_wrong_labels(self.y_train)
+        self.X_train = self.remove_wrong_labels(self.X_train, index)
+        self.sle_train = self.remove_wrong_labels(self.sle_train,index)
+
+
+        #extract data       
         self.y_val = self.y[np.where(self.csv_file.strat_fold == 9)]
         self.y_val = np.reshape(self.y_val,(-1,self.num_of_class))
         self.sle_val = self.meta_sle[np.where(self.csv_file.strat_fold == 9)]
-        self.sle_val = np.reshape(self.sle_val,(-1,1,32))
+        self.sle_val = np.reshape(self.sle_val,(-1,32,1))
+
+        self.y_val, index = self.remove_wrong_labels(self.y_val)
+        self.X_val = self.remove_wrong_labels(self.X_val, index)
+        self.sle_val = self.remove_wrong_labels(self.sle_val,index)
 
         self.y_test = self.y[np.where(self.csv_file.strat_fold == 10)]
         self.y_test = np.reshape(self.y_test,(-1,self.num_of_class))
         self.sle_test = self.meta_sle[np.where(self.csv_file.strat_fold == 10)]
-        self.sle_test = np.reshape(self.sle_test,(-1,1,32))
+        self.sle_test = np.reshape(self.sle_test,(-1,32,1))
 
+        self.y_test, index = self.remove_wrong_labels(self.y_test)
+        self.X_test = self.remove_wrong_labels(self.X_test, index)
+        self.sle_test = self.remove_wrong_labels(self.sle_test,index)
 
-        # self.X_train = self.add_position_temporal(self.X_train)
-        # self.X_val = self.add_position_temporal(self.X_val)
-        # self.X_test = self.add_position_temporal(self.X_test)
     
     def load_raw_data(self,df,sampling_rate,path):
         if (sampling_rate == 100):
@@ -153,7 +162,6 @@ class Preprocessing():
                 tmp.append(self.agg_df.loc[key].diagnostic_subclass)
         return list(set(tmp))
 
-
     #reshape dataset as model dimention for input
     def split_reshape(self,input):
         inputs = []
@@ -164,15 +172,17 @@ class Preprocessing():
         inputs.append(input1)
         inputs.append(input2)
         inputs.append(input3)
+        # join all leads
+        inputs = np.concatenate(inputs, axis =1)
         return inputs
 
-    #add temporal position
-    def add_position_temporal(self,input):
-        for j in range(len(input)):
-            z = np.full((1,1,input[j].shape[2]),range(input[j].shape[2]))       
-            for i in range(input[j].shape[0]): 
-                input[j][i,:,:] = np.add(input[j][i,:,:] ,z)
-            return input
+    def remove_wrong_labels(self,y,index = None):
+        if index is None:    
+            check = np.sum(y,axis = 1)
+            index = check == 0
+            return np.delete(y,index,axis = 0), index
+        else:
+            return np.delete(y,index,axis = 0)
 
     def get_data_x(self):
         return self.X_train,self.X_val,self.X_test
@@ -191,7 +201,21 @@ class Preprocessing():
     def get_data_metadata(self):
         return self.sle_train,self.sle_val,self.sle_test
 
-
+def bandpass(data, lead_index, bp = [3,45], sp = [1,50], gpass = 0.4, spass = 3, fs = sampling_rate, median = False):
+    n, wn = scp.signal.buttord(bp, sp, gpass, spass, fs = fs)
+    b, a = scp.signal.butter(n, wn, 'bandpass', fs = fs)
+    y = scp.signal.lfilter(b, a, data[lead_index])
+    if median:
+        kernel = np.array([1,5,1])
+        y = scp.ndimage.median_filter(y,footprint = kernel, mode = "nearest" )
+    return np.asarray(y)
+def convert_bandpass(data, median = False):
+    for i in range(np.shape(data)[0]): 
+        data[i][0] = bandpass(data[i], 0, bp = [3,45], sp = [1,50], gpass = 0.4, spass = 3, fs = sampling_rate, median = median)
+        data[i][1] = bandpass(data[i], 1, bp = [3,45], sp = [1,50], gpass = 0.4, spass = 3, fs = sampling_rate, median = median)
+        data[i][2] = bandpass(data[i], 2, bp = [1,41], sp = [0,48], gpass = 0.4, spass = 3, fs = sampling_rate, median = median)
+    return data
+    
 def get_img_from_fig(fig, dpi=64):
         buf = io.BytesIO()
         fig.savefig(buf, format="png", dpi=dpi,bbox_inches=0)
@@ -290,15 +314,31 @@ khuyến cáo tạm thời vẫn nên dùng stft thôi
 t sẽ cố xong nốt wigner-ville
 """
 
-# P = Preprocessing(sampling_rate=100,path="")
+# P = Preprocessing(sampling_rate=100,path=path)
 # X_train,X_val,X_test = P.get_data_x()
 # xtrain, xval, xtest = X_train, X_val, X_test
-# xtrain = np.concatenate([xtrain[0],xtrain[1],xtrain[2]],axis=1)
-# xval = np.concatenate([xval[0],xval[1],xval[2]],axis=1)
-# xtest = np.concatenate([xtest[0],xtest[1],xtest[2]],axis=1)
+xtrain = np.load("X_train.npy")
+xval = np.load("X_val.npy")
+xtest = np.load("X_test.npy") 
+
+xtrain_bandpass = convert_bandpass(xtrain, True)
+xtest_bandpass = convert_bandpass(xtest, True)
+xval_bandpass = convert_bandpass(xval, True)
+
+np.save("X_train_bandpass_test",xtrain_bandpass)
+np.save("X_val_bandpass_test",xval_bandpass)
+np.save("X_test_bandpass_test",xtest_bandpass)
+
 # np.save("X_train",xtrain)
 # np.save("X_val",xval)
 # np.save("X_test",xtest)
+
+# ytrain,yval,ytest = P.get_data_y()
+# np.save("ytrain",ytrain), np.save("yval",yval), np.save("ytest",ytest)
+
+# sletrain,sleval,sletest = P.get_data_metadata()
+# np.save("sletrain",sletrain), np.save("sleval",sleval), np.save("sletest",sletest)
+
 # cwt_data(xtrain,xval,xtest)
 # stft_data(xtrain,xval,xtest)
 # print(xtrain.shape)
