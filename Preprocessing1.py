@@ -4,14 +4,13 @@ import pandas as pd
 import ast
 import cv2
 # import tftb
-import skimage
 import scipy as scp
 import io
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 import pywt
 
-path = ""
+path = "/home/ubuntu/Tue.CM210908/data/physionet.org/files/ptb-xl/1.0.3/"
 sampling_rate = 100
 
 class Preprocessing():
@@ -228,15 +227,26 @@ def get_img_from_fig(fig, dpi=64):
         img = img[35:275,50:370]
         return np.dot(img, [0.2989, 0.5870, 0.1140])
 
-def stft_(x,nperseg=100,use_spectro=False):
-        f,t,Zxx = scp.signal.stft(x,fs=100,nperseg=nperseg)
-        return np.abs(Zxx)
+def stft_(x,use_spectro=False):
+        f,t,Zxx = scp.signal.stft(x,fs=100,nperseg=100)
+        if use_spectro:
+            fig = plt.figure()
+            plt.axis('off')
+            plt.pcolormesh(t, f, np.abs(Zxx), cmap = cm.gray)
+            rgb = get_img_from_fig(fig)
+            plt.close()
+            return rgb
+        else:
+            return np.abs(Zxx)
 
-def cwt_gray(signal,f_min=1,f_max=47, size = (128,128),start=0,finish=500):
-    scales = pywt.central_frequency('morl') * sampling_rate / np.arange(f_min, f_max + 1, 1)
-    coef, freqs=pywt.cwt(signal[start:finish],scales,'morl',sampling_period=0.01)
-    bruh = skimage.transform.resize(np.abs(coef),(128,128))
-    return bruh
+def cwt_gray(x):
+        coef, freqs=pywt.cwt(x,np.arange(1, 31),'morl',sampling_period=0.01)
+        fig = plt.figure()
+        plt.axis('off')
+        plt.pcolormesh(np.arange(1000), freqs, np.abs(coef), cmap = cm.gray)
+        rgb = get_img_from_fig(fig)
+        plt.close()
+        return rgb
 
 def wvd_raw(x):
         wvd = tftb.processing.WignerVilleDistribution(x,timestamps=np.arange(1000)*0.01)
@@ -244,41 +254,40 @@ def wvd_raw(x):
         #nếu có thể, t muốn pooling trước khi mình xử lí đống kia
         return tfr_wvd
     
-def stft_data(xtrain, xval, xtest, nperseg = 100, use_spectro=False):
-    shape = (stft_(xtrain[0][0],nperseg=nperseg)).shape
+def stft_data(xtrain, xval, xtest, use_spectro=False):
     if not use_spectro:
-        stft_train = np.zeros((xtrain.shape[0], xtrain.shape[1], shape[0], shape[1]))
-        stft_val = np.zeros((xval.shape[0], xval.shape[1], shape[0], shape[1]))
-        stft_test = np.zeros((xtest.shape[0], xtest.shape[1], shape[0], shape[1]))
-    # elif use_spectro:
-    #     stft_train = np.zeros((xtrain.shape[0], xtrain.shape[1], 240, 320))
-    #     stft_val = np.zeros((xval.shape[0], xval.shape[1], 240, 320))
-    #     stft_test = np.zeros((xtest.shape[0], xtest.shape[1], 240, 320))
+        stft_train = np.zeros((xtrain.shape[0], xtrain.shape[1], 51, 21))
+        stft_val = np.zeros((xval.shape[0], xval.shape[1], 51, 21))
+        stft_test = np.zeros((xtest.shape[0], xtest.shape[1], 51, 21))
+    elif use_spectro:
+        stft_train = np.zeros((xtrain.shape[0], xtrain.shape[1], 240, 320))
+        stft_val = np.zeros((xval.shape[0], xval.shape[1], 240, 320))
+        stft_test = np.zeros((xtest.shape[0], xtest.shape[1], 240, 320))
     for i in range(xtrain.shape[0]):
         for j in range(3):
-            stft_train[i][j] = stft_(xtrain[i][j],use_spectro=use_spectro,nperseg=nperseg)
+            stft_train[i][j] = stft_(xtrain[i][j],use_spectro=use_spectro)
     for i in range(xval.shape[0]):
         for j in range(3):
-            stft_val[i][j] = stft_(xval[i][j],use_spectro=use_spectro,nperseg=nperseg)
+            stft_val[i][j] = stft_(xval[i][j],use_spectro=use_spectro)
     for i in range(xtest.shape[0]):
         for j in range(3):
-            stft_test[i][j] = stft_(xtest[i][j],use_spectro=use_spectro,nperseg=nperseg)
+            stft_test[i][j] = stft_(xtest[i][j],use_spectro=use_spectro)
     np.save("stft_train",stft_train), np.save("stft_val",stft_val), np.save("stft_test",stft_test)
     print("stft done")
 
-def cwt_data(xtrain, xval, xtest,f_min=1,f_max=47,size = (128,128),start=0,finish=500):
-    cwt_train = np.ndarray((xtrain.shape[0], xtrain.shape[1], size[0], size[1]))
-    cwt_val =   np.ndarray((xval.shape[0],   xval.shape[1],   size[0], size[1]))
-    cwt_test =  np.ndarray((xtest.shape[0],  xtest.shape[1],  size[0], size[1]))
+def cwt_data(xtrain, xval, xtest):
+    cwt_train = np.zeros((xtrain.shape[0], xtrain.shape[1], 240, 320))
+    cwt_val =   np.zeros((xval.shape[0], xval.shape[1], 240, 320))
+    cwt_test =  np.zeros((xtest.shape[0], xtest.shape[1], 240, 320))
     for i in range(xtrain.shape[0]):
         for j in range(3):
-            cwt_train[i][j] = cwt_gray(xtrain[i][j],f_min,f_max,size,start,finish)
+            cwt_train[i][j] = cwt_gray(xtrain[i][j])
     for i in range(xval.shape[0]):
         for j in range(3):
-            cwt_val[i][j] = cwt_gray(xval[i][j],f_min,f_max,size,start,finish)
+            cwt_val[i][j] = cwt_gray(xval[i][j])
     for i in range(xtest.shape[0]):
         for j in range(3):
-            cwt_test[i][j] = cwt_gray(xtest[i][j],f_min,f_max,size,start,finish)
+            cwt_test[i][j] = cwt_gray(xtest[i][j])
     np.save("cwt_train",cwt_train), np.save("cwt_val",cwt_val), np.save("cwt_test",cwt_test)
     print("cwt done")
 
@@ -305,31 +314,31 @@ khuyến cáo tạm thời vẫn nên dùng stft thôi
 t sẽ cố xong nốt wigner-ville
 """
 
-P = Preprocessing(sampling_rate=100,path=path)
-X_train,X_val,X_test = P.get_data_x()
-xtrain, xval, xtest = X_train, X_val, X_test
-# xtrain = np.load("X_train.npy")
-# xval = np.load("X_val.npy")
-# xtest = np.load("X_test.npy") 
+# P = Preprocessing(sampling_rate=100,path=path)
+# X_train,X_val,X_test = P.get_data_x()
+# xtrain, xval, xtest = X_train, X_val, X_test
+xtrain = np.load("X_train.npy")
+xval = np.load("X_val.npy")
+xtest = np.load("X_test.npy") 
 
-xtrain_bandpass = convert_bandpass(xtrain, False)
-xtest_bandpass = convert_bandpass(xtest, False)
-xval_bandpass = convert_bandpass(xval, False)
+xtrain_bandpass = convert_bandpass(xtrain, True)
+xtest_bandpass = convert_bandpass(xtest, True)
+xval_bandpass = convert_bandpass(xval, True)
 
 np.save("X_train_bandpass_test",xtrain_bandpass)
 np.save("X_val_bandpass_test",xval_bandpass)
 np.save("X_test_bandpass_test",xtest_bandpass)
 
-np.save("X_train",xtrain)
-np.save("X_val",xval)
-np.save("X_test",xtest)
+# np.save("X_train",xtrain)
+# np.save("X_val",xval)
+# np.save("X_test",xtest)
 
-ytrain,yval,ytest = P.get_data_y()
-np.save("ytrain",ytrain), np.save("yval",yval), np.save("ytest",ytest)
+# ytrain,yval,ytest = P.get_data_y()
+# np.save("ytrain",ytrain), np.save("yval",yval), np.save("ytest",ytest)
 
-sletrain,sleval,sletest = P.get_data_metadata()
-np.save("sletrain",sletrain), np.save("sleval",sleval), np.save("sletest",sletest)
+# sletrain,sleval,sletest = P.get_data_metadata()
+# np.save("sletrain",sletrain), np.save("sleval",sleval), np.save("sletest",sletest)
 
-cwt_data(xtrain,xval,xtest)
-stft_data(xtrain,xval,xtest)
-print(xtrain.shape)
+# cwt_data(xtrain,xval,xtest)
+# stft_data(xtrain,xval,xtest)
+# print(xtrain.shape)

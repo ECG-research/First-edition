@@ -8,30 +8,80 @@ import matplotlib.pyplot as plt
 from sklearn.metrics import f1_score, roc_auc_score
 import second_edition as model
 
+# transfering pseudoclassifier
+# p_classifier = model.Pseudo_classifier()
+# p_classifier.load_state_dict(torch.load("pseudo_test"))
+# p_classifier.eval()
+# for param in p_classifier.parameters():
+#     param.requires_grad = False
+
+def load_pm(path, type):
+    pm = model.Projection_Module(type = type)
+    pm.load_state_dict(torch.load(path))
+    pm.eval()
+    for param in pm.parameters():
+        param.requires_grad = False
+    return pm
+
+#hyperparameters
+path = "/home/ubuntu/Tue.CM210908/data/physionet.org/files/ptb-xl/1.0.3/"
 sampling_rate = 100
 num_eporch = 100
 thresh_hold = 0.5
+batch_size = 128
+e2e = False
+device = torch.device("cuda:2" if torch.cuda.is_available() else "cpu")
 
-if torch.cuda.is_available(): 
-    dev = "cuda:2" 
-else: 
-    dev = "cpu" 
-device = torch.device(dev)
+#load projection module
+if not e2e:
+    pm_raw = load_pm("raw_pm_test","raw")
+    pm_dwt = load_pm("dwt_pm_test","raw") # type is raw because I used inception for dwt
+    pm_stft = load_pm("stft_pm_test","stft")
+else:
+    pm_raw = model.Projection_Module(type = "raw")
+    pm_dwt = model.Projection_Module(type = "raw")
+    pm_stft = model.Projection_Module(type = "stft")
+pms = [pm_raw,pm_dwt,pm_stft]
+# initialize network
+net = model.Second_edition(pms).to(device)
 
-# branch network
-p_classifier = model.Pseudo_classifier()
-p_classifier.load_state_dict(torch.load("pseudo_test"))
-p_classifier.eval()
-for param in p_classifier.parameters():
-    param.requires_grad = False
-
-branch_wl = model.Branch(type="wavelet", classifier=p_classifier).to(device)
-
-# evaluation methods
+#initialize criterion, optimizer
 criterion = nn.functional.binary_cross_entropy_with_logits
-optimizer = optim.Adam(branch_wl.parameters(), lr=1e-4)
+distance = nn.functional.cosine_similarity
+
+def criterion_func(output,label,pred1,pred2,pred3,alpha=0.1):
+    pred1 = torch.squeeze(pred1,dim = 1)
+    pred2 = torch.squeeze(pred2,dim = 1)
+    pred3 = torch.squeeze(pred3,dim = 1)
+    distance1 = distance(pred1,pred2)
+    distance2 = distance(pred2,pred3)
+    distance3 = distance(pred3,pred1)
+    distance_all = distance1 + distance2 + distance3
+    return torch.sub(criterion(output,label), distance_all,alpha = alpha).sum()/256
+optimizer = optim.AdamW(net.parameters(), lr=1e-4)
 scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer,T_max = 3,eta_min=2e-6)
 
+#load_data
+xtrain = np.load("X_train_bandpass.npy")
+xval = np.load("X_val_bandpass.npy")
+xtest = np.load("X_test_bandpass.npy")
+xtrain = torch.from_numpy(xtrain)
+xval = torch.from_numpy(xval)
+xtest = torch.from_numpy(xtest)
+
+dwt_train = np.load("dwt_train.npy")
+dwt_val = np.load("dwt_val.npy")
+dwt_test = np.load("dwt_test.npy")
+dwt_train = torch.from_numpy(dwt_train)
+dwt_val = torch.from_numpy(dwt_val)
+dwt_test = torch.from_numpy(dwt_test)
+
+stft_train = np.load("stft_train.npy")
+stft_val = np.load("stft_val.npy")
+stft_test = np.load("stft_test.npy")
+stft_train = torch.from_numpy(stft_train)
+stft_val = torch.from_numpy(stft_val)
+stft_test = torch.from_numpy(stft_test)
 
 ytrain = np.load("ytrain.npy")
 yval = np.load("yval.npy")
@@ -47,18 +97,9 @@ sletrain = torch.from_numpy(sletrain)
 sleval = torch.from_numpy(sleval)
 sletest = torch.from_numpy(sletest)
 
-
-cwt_train = np.load("cwt_train.npy")
-cwt_val = np.load("cwt_val.npy")
-cwt_test = np.load("cwt_test.npy")
-cwt_train = torch.from_numpy(cwt_train)
-cwt_val = torch.from_numpy(cwt_val)
-cwt_test = torch.from_numpy(cwt_test)
-
-# dataloader
-train_data = DataLoader(TensorDataset(cwt_train,sletrain,ytrain), batch_size=128, shuffle=True)
-val_data = DataLoader(TensorDataset(cwt_val,sleval,yval), batch_size = 128, shuffle=False)
-test_data = DataLoader(TensorDataset(cwt_test,sletest,ytest), batch_size = 128, shuffle=False)
+train_data = DataLoader(TensorDataset(xtrain,dwt_train,stft_train,sletrain,ytrain), batch_size=batch_size, shuffle=True)
+val_data = DataLoader(TensorDataset(xval,dwt_val,stft_val,sleval,yval), batch_size=batch_size, shuffle=False)
+test_data = DataLoader(TensorDataset(xtest,dwt_test,stft_test,sletest,ytest), batch_size=batch_size, shuffle=False)
 
 #train
 train_loss = []
@@ -84,24 +125,29 @@ loss_all = []
 
 count = 0
 max_count = 1
+num_allow_end_condition = 14
 for t in range(1):
     for epoch in tqdm(range(num_eporch)):
-        branch_wl.train()
+        net.train()
         print("Epoch {}:/n-----------------------------------------------------------".format(epoch +1)) 
-        if epoch%4 == 3 and epoch < 12:
+        if epoch%4 == 3 and epoch < num_allow_end_condition:
             scheduler.step()
         train_acc = []
         train_loss = []
         train_auc = []
         train_score = []
-        for inputs,metadata,labels in tqdm(train_data):
-            inputs,metadata,labels = inputs.to(device),metadata.to(device),labels.to(device)
+        for inputs,dwt,stft,metadata,labels in tqdm(train_data):
+            inputs,dwt,stft,metadata,labels = inputs.to(device),dwt.to(device),stft.to(device),metadata.to(device).float(),labels.to(device)
+            x = [inputs.float(),dwt.float(),stft.float()]
             running_loss = 0.0
             optimizer.zero_grad()
 
             # forward + backward + optimize
-            outputs = branch_wl(inputs.float(),metadata.float())
-            loss = criterion(outputs, labels.float())
+            outputs = net(x,metadata)
+            if e2e:
+                loss = criterion_func(outputs, labels.float(), net.features[0],net.features[1],net.features[2])
+            else:
+                loss = criterion(outputs, labels.float())
             loss.backward()
             optimizer.step()
             
@@ -109,7 +155,6 @@ for t in range(1):
             pred = outputs.cpu().detach().numpy() > thresh_hold
             labels = labels.cpu().detach().numpy()
             score = f1_score(labels,pred,average='macro')
-            
             area = roc_auc_score(labels,outputs.cpu().detach().numpy(),average = "macro")
             acc = (pred == labels).sum()/(inputs.shape[0]*5)
             
@@ -136,15 +181,18 @@ for t in range(1):
             val_acc = []
             val_auc = []
             val_score = []
-            branch_wl.eval()
+            net.eval()
             running_loss = 0.0
-            for inputs, metadata, labels in tqdm(val_data):
-                inputs, metadata, labels = inputs.to(device),metadata.to(device), labels.to(device)
+            for inputs,dwt,stft,metadata,labels in tqdm(val_data):
+                inputs,dwt,stft,metadata,labels = inputs.to(device),dwt.to(device),stft.to(device),metadata.to(device).float(),labels.to(device)
+                x = [inputs.float(),dwt.float(),stft.float()]
                 # forward + backward + optimize
-                outputs = branch_wl(inputs.float(),metadata.float())
-                loss = criterion(outputs, labels.float())
+                outputs = net(x,metadata)
+                if e2e:
+                    loss = criterion_func(outputs, labels.float(), net.features[0],net.features[1],net.features[2])
+                else:
+                    loss = criterion(outputs, labels.float())
                 # calculate output acc
-
                 pred = outputs.cpu().detach().numpy() > thresh_hold
                 labels = labels.cpu().detach().numpy()
                 score = f1_score(labels,pred,average='macro')
@@ -159,8 +207,8 @@ for t in range(1):
             epoch_val_loss = sum(val_loss)/len(val_loss)
             epoch_val_acc = sum(val_acc)/len(val_acc)
             epoch_val_auc = sum(val_auc)/len(val_auc)
-            epoch_val_score = sum(val_score)/len(val_score)   
-            if epoch >= 14:    
+            epoch_val_score = sum(val_score)/len(val_score)
+            if epoch >= num_allow_end_condition:    
                 if epoch_val_auc < val_auc_all[-1]:
                     count += 1
                     if count >= max_count:
@@ -180,20 +228,24 @@ for t in range(1):
 
     print("\nfinished training =================================================")
 
+
     test_loss = []
     test_score = []
     test_acc = []
     test_auc = []
     with torch.no_grad():
-        branch_wl.eval()
+        net.eval()
         running_loss = 0.0
         batch_test = []
-        for inputs, metadata, labels in tqdm(test_data):
-            inputs,metadata,labels = inputs.to(device),metadata.to(device),labels.to(device)
-            outputs = branch_wl(inputs.float(),metadata.float())
-            loss = criterion(outputs, labels.float())
+        for inputs,dwt,stft,metadata,labels in tqdm(test_data):
+            inputs,dwt,stft,metadata,labels = inputs.to(device),dwt.to(device),stft.to(device),metadata.to(device).float(),labels.to(device)
+            x = [inputs.float(),dwt.float(),stft.float()]
+            outputs = net(x,metadata)
+            if e2e:
+                loss = criterion_func(outputs, labels.float(), net.features[0],net.features[1],net.features[2])
+            else:
+                loss = criterion(outputs, labels.float())
             # calculate output acc
-            # score = f1(outputs,labels)
             pred = outputs.cpu().detach().numpy() > thresh_hold
             labels = labels.cpu().detach().numpy()
             score = f1_score(labels,pred,average='macro')
@@ -225,8 +277,4 @@ print(auc_all)
 print(sum(auc_all)/len(auc_all))
 print(loss_all)
 
-torch.save(branch_wl.pm.state_dict(),"cwt_pm_test")
-# pm = model.Projection_Module()
-# pm.load_state_dict(torch.load("stft_pm"))
-# pm.eval()
-# print(pm(stft_val.float(),sleval.float()))
+torch.save(net.classify.state_dict(),"ensemble_classify_test")
