@@ -3,17 +3,19 @@ import wfdb
 import pandas as pd
 import ast
 import cv2
-# import tftb
 import skimage
+# import tftb
 import scipy as scp
+from scipy import signal as sg
 import io
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 import pywt
 
-path = ""
+path = "/home/ubuntu/Tue.CM210908/data/physionet.org/files/ptb-xl/1.0.3/"
 sampling_rate = 100
 cm_jet = cm.get_cmap('jet')
+
 class Preprocessing():
     def __init__(self,path,sampling_rate,experiment = 'diagnostic_superclass'):
         self.experiment = experiment
@@ -119,7 +121,6 @@ class Preprocessing():
         self.y_train, index = self.remove_wrong_labels(self.y_train)
         self.X_train = self.remove_wrong_labels(self.X_train, index)
         self.sle_train = self.remove_wrong_labels(self.sle_train,index)
-
 
         #extract data       
         self.y_val = self.y[np.where(self.csv_file.strat_fold == 9)]
@@ -252,7 +253,16 @@ def cwt_gray(signal,f_min=1,f_max=47, size = (224,224),start=0,finish=500,rgb=Fa
         bruh = cm_jet(bruh)
         bruh = np.uint8(bruh*255) #có thể bỏ đi ở đây để cho nó về 01
         bruh = bruh[:,:,0:3].transpose(2,0,1) #lấy rgb và đổi về (3,224,224)
-    return bruh
+    return bruh 
+
+def _cwt_scipy(sig,widths):
+    return sg.cwt(sig, sg.ricker, widths)
+
+def dwt_(x, wavelet = "db1", mode = "cpd"):
+    (cA, cD) = pywt.dwt(x,wavelet,mode = mode)
+    cA = np.squeeze(cA) 
+    cD = np.squeeze(cD) 
+    return np.concatenate((cA,cD), axis = 1)
 
 def wvd_raw(x):
         wvd = tftb.processing.WignerVilleDistribution(x,timestamps=np.arange(1000)*0.01)
@@ -326,6 +336,22 @@ def cwt_data(xtrain, xval, xtest,f_min=1,f_max=47,size = (224,224),start=0,finis
     print(cwt_train.shape)
     print("cwt done")
 
+def cwt_data_scipy(xtrain, xval, xtest, widths = np.arange(1,31), size = (30,250)):
+    cwt_train = np.ndarray((xtrain.shape[0], xtrain.shape[1], size[0], size[1]))
+    cwt_val =   np.ndarray((xval.shape[0],   xval.shape[1],   size[0], size[1]))
+    cwt_test =  np.ndarray((xtest.shape[0],  xtest.shape[1],  size[0], size[1]))
+    for i in range(xtrain.shape[0]):
+        for j in range(3):
+            cwt_train[i][j] = _cwt_scipy(xtrain[i][j],widths)
+    for i in range(xval.shape[0]):
+        for j in range(3):
+            cwt_val[i][j] = _cwt_scipy(xval[i][j],widths)
+    for i in range(xtest.shape[0]):
+        for j in range(3):
+            cwt_test[i][j] = _cwt_scipy(xtest[i][j],widths)
+    np.save("cwt_train_ricker",cwt_train), np.save("cwt_val_ricker",cwt_val), np.save("cwt_test_ricker",cwt_test)
+    print("cwt done")
+
 def wvd_data(xtrain, xval, xtest):
     wvd_train = np.zeros((xtrain.shape[0], xtrain.shape[1], 1000, 1000))
     wvd_val =   np.zeros((xval.shape[0], xval.shape[1], 1000, 1000))
@@ -342,34 +368,70 @@ def wvd_data(xtrain, xval, xtest):
     np.save("wvd_train",wvd_train), np.save("wvd_val",wvd_val), np.save("wvd_test",wvd_test)
     print("wvd done")
 
-"""
-đoạn code phía dưới này uncomment chạy một lần để tạo các file data
-còn lại ở trên có hàm get_data_stft, get_data_cwt
-khuyến cáo tạm thời vẫn nên dùng stft thôi
-t sẽ cố xong nốt wigner-ville
-"""
+def dwt_data(xtrain, xval, xtest, wavelet = "db1", mode = "cpd"):
+    coeffs_train = []
+    coeffs_val = []
+    coeffs_test = []
+    for i in range(xtrain.shape[0]):
+        coeff = dwt_(xtrain[i], wavelet, mode)
+        coeffs_train.append(coeff)
+    for i in range(xval.shape[0]):
+        coeff = dwt_(xval[i], wavelet, mode)
+        coeffs_val.append(coeff)
+    for i in range(xtest.shape[0]):
+        coeff = dwt_(xtest[i], wavelet, mode)
+        coeffs_test.append(coeff)
+    np.save("dwt_train",coeffs_train), np.save("dwt_val",coeffs_val), np.save("dwt_test",coeffs_test)
+    print("dwt done")
+
+def segmentation(x,y,sle,n_part = 4):
+    assert 1000%n_part == 0, "n_part must be the divisor of squence length"
+    x_aug = np.split(x, n_part, axis = 2)
+    y_aug = []
+    sle_aug = []
+    for _ in range(n_part):    
+        y_aug.append(y)
+        sle_aug.append(sle)
+    return np.concatenate(x_aug,axis = 0), np.concatenate(y_aug,axis = 0), np.concatenate(sle_aug,axis = 0)
+
 
 # P = Preprocessing(sampling_rate=100,path=path)
 # X_train,X_val,X_test = P.get_data_x()
 # xtrain, xval, xtest = X_train, X_val, X_test
 
+# xtrain = np.load("X_train_bandpass.npy")
+# xval = np.load("X_val_bandpass.npy")
+# xtest = np.load("X_test_bandpass.npy")
 
+ytrain = np.load("ytrain.npy")
+yval = np.load("yval.npy")
+ytest = np.load("ytest.npy")
 
-xtrain = np.load("X_train.npy")
-xval = np.load("X_val.npy")
-xtest = np.load("X_test.npy") 
+# sletrain = np.load("sletrain.npy")
+# sleval = np.load("sleval.npy")
+# sletest = np.load("sletest.npy")
 
-xtrain_bandpass = convert_bandpass(xtrain, False)
-xtest_bandpass = convert_bandpass(xtest, False)
-xval_bandpass = convert_bandpass(xval, False)
-
-np.save("X_train_bandpass_test",xtrain_bandpass)
-np.save("X_val_bandpass_test",xval_bandpass)
-np.save("X_test_bandpass_test",xtest_bandpass)
+print(ytrain.shape)
 
 # np.save("X_train",xtrain)
 # np.save("X_val",xval)
 # np.save("X_test",xtest)
+
+# ytrain,yval,ytest = P.get_data_y()
+# sletrain,sleval,sletest = P.get_data_metadata()
+
+# xtrain_bandpass = convert_bandpass(xtrain)
+# xtest_bandpass = convert_bandpass(xtest)
+# xval_bandpass = convert_bandpass(xval)
+
+# xtrain_bandpass, ytrain, sletrain = segmentation(xtrain_bandpass, ytrain, sletrain)
+# xval_bandpass, yval, sleval = segmentation(xval_bandpass, yval, sleval)
+# xtest_bandpass, ytest, sletest = segmentation(xtest_bandpass, ytest, sletest)
+
+# np.save("X_train_bandpass",xtrain_bandpass)
+# np.save("X_val_bandpass",xval_bandpass)
+# np.save("X_test_bandpass",xtest_bandpass)
+
 
 # ytrain,yval,ytest = P.get_data_y()
 # np.save("ytrain",ytrain), np.save("yval",yval), np.save("ytest",ytest)
@@ -377,6 +439,6 @@ np.save("X_test_bandpass_test",xtest_bandpass)
 # sletrain,sleval,sletest = P.get_data_metadata()
 # np.save("sletrain",sletrain), np.save("sleval",sleval), np.save("sletest",sletest)
 
-# cwt_data(xtrain_bandpass,xval_bandpass,xtest_bandpass)
-stft_data(xtrain_bandpass,xval_bandpass,xtest_bandpass)
-# print(xtrain.shape)
+# cwt_data_scipy(xtrain,xval,xtest)
+# stft_data(xtrain,xval,xtest)
+# dwt_data(xtrain,xval,xtest)
