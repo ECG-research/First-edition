@@ -1,418 +1,382 @@
-#taken and modified from https://github.com/helme/ecg_ptbxl_benchmarking
-#truly a live saver
-"""
-File này chạy một lần là có đủ các cái data, labels, metadata save vào nhé
-Tốc độ cao, và đặc biệt là nó chỉ ra là cái metric mình bị lmao
-À với cả nó có cả mấy cái custom metric nữa kìa, ta có thể tham khảo
-anh có thể đọc phần dưới, với việc không có thằng nào label full 0, chắc là sẽ đỡ noise hơn
-"""
-#default imports
-import os
-import sys
-import re
-import glob
-import pickle 
-import copy
-
-#for loading and modifying data
 import pandas as pd
 import numpy as np
-# import matplotlib.pyplot as plt #for plotting
-from tqdm import tqdm #better progress bar
 import wfdb
 import ast
+def init_everything():
+    def load_raw_data(df, sampling_rate, path):
+        if sampling_rate == 100:
+            data = [wfdb.rdsamp(path+f) for f in df.filename_lr]
+        else:
+            data = [wfdb.rdsamp(path+f) for f in df.filename_hr]
+        data = np.array([signal for signal, meta in data])
+        return data
 
-#for evaluation purposes (ở t cx skip phần này một chút)
-from sklearn.metrics import fbeta_score, roc_auc_score, roc_curve, roc_curve, auc
-from sklearn.preprocessing import StandardScaler, MultiLabelBinarizer
-# from matplotlib.axes._axes import _log as matplotlib_axes_logger
-# import warnings
+    path = 'path/to/ptbxl/'
+    sampling_rate=100
 
-"""
-First are the metrics used for calculating shits
-We do not want to touch on those just yet.
-"""
-#ở đó họ có hết mấy hàm kia rồi, t đọc sốt cốt xong t thấy t ngu vcl, sorry a
-def generate_results(idxs, y_true, y_pred, thresholds):
-    return evaluate_experiment(y_true[idxs], y_pred[idxs], thresholds)
+    # load and convert annotation data
+    Y = pd.read_csv(path+'ptbxl_database.csv', index_col='ecg_id')
+    Y.scp_codes = Y.scp_codes.apply(lambda x: ast.literal_eval(x))
 
-def evaluate_experiment(y_true, y_pred, thresholds=None):
-    results = {}
+    # Load raw signal data
+    X = load_raw_data(Y, sampling_rate, path)
 
-    if not thresholds is None:
-        # binary predictions
-        y_pred_binary = apply_thresholds(y_pred, thresholds)
-        # PhysioNet/CinC Challenges metrics
-        challenge_scores = challenge_metrics(y_true, y_pred_binary, beta1=2, beta2=2)
-        results['F_beta_macro'] = challenge_scores['F_beta_macro']
-        results['G_beta_macro'] = challenge_scores['G_beta_macro']
+    # Load scp_statements.csv for diagnostic aggregation
+    agg_df = pd.read_csv(path+'scp_statements.csv', index_col=0)
+    agg_df = agg_df[agg_df.diagnostic == 1]
 
-    # label based metric
-    results['macro_auc'] = roc_auc_score(y_true, y_pred, average='macro') #DUCKKKKKKKKK
+    def aggregate_diagnostic(y_dic):
+        tmp = []
+        for key in y_dic.keys():
+            if key in agg_df.index:
+                tmp.append(agg_df.loc[key].diagnostic_class)
+        return list(set(tmp))
+    def aggregate_subdiagnostic(self,y_dic):
+        tmp = []
+        for key in y_dic.keys():
+            if key in self.agg_df.index:
+                tmp.append(self.agg_df.loc[key].diagnostic_subclass)
+        return list(set(tmp))
+    val_fold = 9
+    test_fold = 10
+
+    # Apply labels
+    experiment = 'diagnostic_superclass'
+    if experiment = 'diagnostic_superclass':
+        Y['diagnostic_superclass'] = Y.scp_codes.apply(aggregate_diagnostic)
+        y_train = Y[np.where(Y.strat_fold <= 8)].diagnostic_superclass
+        y_val = Y[np.where(Y.strat_fold == 9)].diagnostic_superclass
+        y_test = Y[np.where(Y.strat_fold == test_fold)].diagnostic_superclass
+    elif experiment = 'diagnostic_subclass':
+        Y['diagnostic_subclass'] = Y.scp_codes.apply(aggregate_subdiagnostic)
+        y_train = Y[np.where(Y.strat_fold <= 8)].diagnostic_subclass
+        y_val = Y[np.where(Y.strat_fold == 9)].diagnostic_subclass
+        y_test = Y[np.where(Y.strat_fold == test_fold)Y.strat_fold == test_fold].diagnostic_subclass
+        
+    X_train = X[np.where(Y.strat_fold <= 8)].transpose(0, 2, 1) 
+    X_val = X[np.where(Y.strat_fold == 9)].transpose(0, 2, 1) 
+    X_test = X[np.where(Y.strat_fold == test_fold)].transpose(0, 2, 1) 
+
+    #label binarizing
+    mlb = preprocessing.MultiLabelBinarizer()
+    if experiment == "diagnostic_superclass":
+        mlb.fit([['CD','HYP','MI','NORM','STTC']])
+    elif experiment == "diagnostic_subclass":
+        mlb.fit([['_AVB','AMI','CLBBB','CRBBB','ILBBB','IMI','IRBBB','ISC_','ISCA','ISCI','IVCD','LAFB/LPFB','LAO/LAE','LMI','LVH','NORM','NST_','PMI','RAO/RAE','RVH','SEHYP','STTC','WPW']])
+    y_train = mlb.transform(y_train)
+    y_val = mlb.transform(y_val)
+    y_test = mlb.transform(y_test)
+
+    #remove zeros labels
+    if remove_zeros:
+        a = []
+        for y in y_train:
+            if len(y) == 0:
+                a.append(False)
+            else:
+                a.append(True)
+        X_train = X_train[a]
+        y_train = y_train[a]
+
+        a = []
+        for y in y_val:
+            if len(y) == 0:
+                a.append(False)
+            else:
+                a.append(True)
+        X_val = X_val[a]
+        y_val = y_val[a]
+
+        a = []
+        for y in y_test:
+            if len(y) == 0:
+                a.append(False)
+            else:
+                a.append(True)
+        X_test = X_test[a]
+        y_test = y_test[a]
+
+    # Apply bandpass filter
+
+    # saving the data
+    if experiment == "diagnostic_superclass":
+        np.save("X_super_train", x_train)
+        np.save("X_super_val",   x_val)
+        np.save("X_super_test",  x_test)
+        np.save("y_super_train", y_train)
+        np.save("y_super_val",   y_val)
+        np.save("y_super_test",  y_test)
+    elif experiment == "diagnostic_subclass":
+        np.save("X_sub_train", x_train)
+        np.save("X_sub_val",   x_val)
+        np.save("X_sub_test",  x_test)
+        np.save("y_sub_train", y_train)
+        np.save("y_sub_val",   y_val)
+        np.save("y_sub_test",  y_test)
     
-    df_result = pd.DataFrame(results, index=[0])
-    return df_result
+    return x_train, x_val, x_test
 
-def challenge_metrics(y_true, y_pred, beta1=2, beta2=2, class_weights=None, single=False):
-    f_beta = 0
-    g_beta = 0
-    if single: # if evaluating single class in case of threshold-optimization
-        sample_weights = np.ones(y_true.sum(axis=1).shape)
-    else:
-        sample_weights = y_true.sum(axis=1)
-    for classi in range(y_true.shape[1]):
-        y_truei, y_predi = y_true[:,classi], y_pred[:,classi]
-        TP, FP, TN, FN = 0.,0.,0.,0.
-        for i in range(len(y_predi)):
-            sample_weight = sample_weights[i]
-            if y_truei[i]==y_predi[i]==1: 
-                TP += 1./sample_weight
-            if ((y_predi[i]==1) and (y_truei[i]!=y_predi[i])): 
-                FP += 1./sample_weight
-            if y_truei[i]==y_predi[i]==0: 
-                TN += 1./sample_weight
-            if ((y_predi[i]==0) and (y_truei[i]!=y_predi[i])): 
-                FN += 1./sample_weight 
-        f_beta_i = ((1+beta1**2)*TP)/((1+beta1**2)*TP + FP + (beta1**2)*FN)
-        g_beta_i = (TP)/(TP+FP+beta2*FN)
+xtrain,xval,xtest = init_everything()
+#Transformations
+def bandpass(data, lead_index, bp = [3,45], sp = [1,50], gpass = 0.4, spass = 3, fs = sampling_rate, median = False):
+    n, wn = scp.signal.buttord(bp, sp, gpass, spass, fs = fs)
+    b, a = scp.signal.butter(n, wn, 'bandpass', fs = fs)
+    y = scp.signal.lfilter(b, a, data[lead_index])
+    if median:
+        kernel = np.array([1,5,1])
+        y = scp.ndimage.median_filter(y,footprint = kernel, mode = "nearest" )
+    return np.asarray(y)
 
-        f_beta += f_beta_i
-        g_beta += g_beta_i
-
-    return {'F_beta_macro':f_beta/y_true.shape[1], 'G_beta_macro':g_beta/y_true.shape[1]}
-
-def get_appropriate_bootstrap_samples(y_true, n_bootstraping_samples):
-    samples=[]
-    while True:
-        ridxs = np.random.randint(0, len(y_true), len(y_true))
-        if y_true[ridxs].sum(axis=0).min() != 0:
-            samples.append(ridxs)
-            if len(samples) == n_bootstraping_samples:
-                break
-    return samples
-
-def find_optimal_cutoff_threshold(target, predicted):
-    """ 
-    Find the optimal probability cutoff point for a classification model related to event rate
-    """
-    fpr, tpr, threshold = roc_curve(target, predicted)
-    optimal_idx = np.argmax(tpr - fpr)
-    optimal_threshold = threshold[optimal_idx]
-    return optimal_threshold
-
-def find_optimal_cutoff_thresholds(y_true, y_pred):
-	return [find_optimal_cutoff_threshold(y_true[:,i], y_pred[:,i]) for i in range(y_true.shape[1])]
-
-def find_optimal_cutoff_threshold_for_Gbeta(target, predicted, n_thresholds=100):
-    thresholds = np.linspace(0.00,1,n_thresholds)
-    scores = [challenge_metrics(target, predicted>t, single=True)['G_beta_macro'] for t in thresholds]
-    optimal_idx = np.argmax(scores)
-    return thresholds[optimal_idx]
-
-def find_optimal_cutoff_thresholds_for_Gbeta(y_true, y_pred):
-    print("optimize thresholds with respect to G_beta")
-    return [find_optimal_cutoff_threshold_for_Gbeta(y_true[:,k][:,np.newaxis], y_pred[:,k][:,np.newaxis]) for k in tqdm(range(y_true.shape[1]))]
-
-def apply_thresholds(preds, thresholds):
-	"""
-		apply class-wise thresholds to prediction score in order to get binary format.
-		BUT: if no score is above threshold, pick maximum. This is needed due to metric issues.
-	"""
-	tmp = []
-	for p in preds:
-		tmp_p = (p > thresholds).astype(int)
-		if np.sum(tmp_p) == 0:
-			tmp_p[np.argmax(p)] = 1
-		tmp.append(tmp_p)
-	tmp = np.array(tmp)
-	return tmp
-
-#DATA PROCESSING STUFF
-def load_dataset(path, sampling_rate, release=False):
-    if True:
-        # load and convert annotation data
-        Y = pd.read_csv(path+'ptbxl_database.csv', index_col='ecg_id')
-        Y.scp_codes = Y.scp_codes.apply(lambda x: ast.literal_eval(x))
-        #Y ở đây thật ra là cái df, còn Y.scp_codes là để apply ra đống labels
-        # Load raw signal data
-        X = load_raw_data_ptbxl(Y, sampling_rate, path)
-        #hàm load_raw_data sẽ được định nghĩa lại ở dưới
-
-    return X, Y
-
-def load_raw_data_ptbxl(df, sampling_rate, path):
-    #df thật ra chính là cái data frame được load vào từ file csv
-    if sampling_rate == 100:
-        if False: #ở mấy chỗ này t để if false để thôi mình lưu một lần thôi đãm khi nào t rõ hơn vụ Pickle t sẽ xly nốt
-            data = np.load(path+'raw100.npy', allow_pickle=True)
-        else:
-            data = [wfdb.rdsamp(path+f,channels=[0,1,7]) for f in tqdm(df.filename_lr)]
-            data = np.array([signal for signal, meta in data])
-            # pickle.dump(data, open(path+'raw100.npy', 'wb'), protocol=4)
-    elif sampling_rate == 500:
-        if False:
-            data = np.load(path+'raw500.npy', allow_pickle=True)
-        else:
-            data = [wfdb.rdsamp(path+f,channels=[0,1,7]) for f in tqdm(df.filename_hr)]
-            data = np.array([signal for signal, meta in data])
-            pickle.dump(data, open(path+'raw500.npy', 'wb'), protocol=4)
-    #ở đây họ trả cho ta raw data.
+def convert_bandpass(data, median = False):
+    for i in range(np.shape(data)[0]): 
+        data[i][0] = bandpass(data[i], 0, bp = [3,45], sp = [1,50], gpass = 0.4, spass = 3, fs = sampling_rate, median = median)
+        data[i][1] = bandpass(data[i], 1, bp = [3,45], sp = [1,50], gpass = 0.4, spass = 3, fs = sampling_rate, median = median)
+        data[i][2] = bandpass(data[i], 2, bp = [3,45], sp = [1,50], gpass = 0.4, spass = 3, fs = sampling_rate, median = median)
+        data[i][3] = bandpass(data[i], 3, bp = [3,45], sp = [1,50], gpass = 0.4, spass = 3, fs = sampling_rate, median = median)
+        data[i][4] = bandpass(data[i], 4, bp = [3,45], sp = [1,50], gpass = 0.4, spass = 3, fs = sampling_rate, median = median)
+        data[i][5] = bandpass(data[i], 5, bp = [3,45], sp = [1,50], gpass = 0.4, spass = 3, fs = sampling_rate, median = median)
+        data[i][6] = bandpass(data[i], 6, bp = [1,40], sp = [0,50], gpass = 0.4, spass = 3, fs = sampling_rate, median = median)
+        data[i][7] = bandpass(data[i], 7, bp = [1,40], sp = [0,50], gpass = 0.4, spass = 3, fs = sampling_rate, median = median)
+        data[i][8] = bandpass(data[i], 8, bp = [1,40], sp = [0,50], gpass = 0.4, spass = 3, fs = sampling_rate, median = median)
+        data[i][9] = bandpass(data[i], 9, bp = [1,40], sp = [0,50], gpass = 0.4, spass = 3, fs = sampling_rate, median = median)
+        data[i][10] = bandpass(data[i], 10, bp = [1,40], sp = [0,50], gpass = 0.4, spass = 3, fs = sampling_rate, median = median)
+        data[i][11] = bandpass(data[i], 11, bp = [1,40], sp = [0,50], gpass = 0.4, spass = 3, fs = sampling_rate, median = median)
     return data
 
-def compute_label_aggregations(df, folder, ctype):
+# def get_img_from_fig(fig, dpi=64):
+#         buf = io.BytesIO()
+#         fig.savefig(buf, format="png", dpi=dpi,bbox_inches=0)
+#         buf.seek(0)
+#         img_arr = np.frombuffer(buf.getvalue(), dtype=np.uint8)
+#         buf.close()
+#         img = cv2.imdecode(img_arr, 1)
+#         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+#         img = img[35:275,50:370]
+#         return np.dot(img, [0.2989, 0.5870, 0.1140])
 
-    df['scp_codes_len'] = df.scp_codes.apply(lambda x: len(x))
+# def stft_(x,nperseg=40,size = (224,224),rgb=False):
+        
+#         f,t,Zxx = scp.signal.stft(x,fs=100,nperseg=nperseg)
+#         bruh = np.abs(Zxx)
+#         # bruh = cv2.resize(bruh,size)
+#         bruh = (bruh-np.min(bruh))/(np.max(bruh)-np.min(bruh))
+        
+#         if (rgb):
+#             bruh = cm_jet(bruh)
+#             bruh = np.uint8(bruh*255) #bỏ dòng này để chạy về khoảng [0,1]
+#             bruh = bruh[:,:,0:3].transpose(2,0,1) #lấy rgb và đổi về (3,224,224)
+#         return bruh
 
-    aggregation_df = pd.read_csv(folder+'scp_statements.csv', index_col=0) #dòng này đọc ra các cái bệnh cần được classify
+# def cwt_gray(signal,f_min=1,f_max=47, size = (224,224),start=0,finish=500,rgb=False):
+#     scales = pywt.central_frequency('morl') * sampling_rate / np.arange(f_min, f_max + 1, 1)
+#     scales = np.arange(1,48)
+#     coef, freqs=pywt.cwt(signal[start:finish],scales,'morl',sampling_period=0.01)
+#     bruh = np.abs(coef)
+#     bruh = (bruh-np.min(bruh))/(np.max(bruh)-np.min(bruh))
+#     bruh = cv2.resize(bruh,size)
+#     if rgb:
+#         bruh = cm_jet(bruh)
+#         bruh = np.uint8(bruh*255) #có thể bỏ đi ở đây để cho nó về 01
+#         bruh = bruh[:,:,0:3].transpose(2,0,1) #lấy rgb và đổi về (3,224,224)
+#     return bruh 
 
-    if ctype in ['diagnostic', 'subdiagnostic', 'superdiagnostic']:
+def _cwt_scipy(sig,widths):
+    return sg.cwt(sig, sg.ricker, widths)
 
-        def aggregate_all_diagnostic(y_dic):
-            tmp = []
-            for key in y_dic.keys():
-                if key in diag_agg_df.index:
-                    tmp.append(key)
-            return list(set(tmp))
+def dwt_(x, wavelet = "db1", mode = "cpd"):
+    (cA, cD) = pywt.dwt(x,wavelet,mode = mode)
+    cA = np.squeeze(cA) 
+    cD = np.squeeze(cD) 
+    return np.concatenate((cA,cD), axis = 1)
 
-        def aggregate_subdiagnostic(y_dic):
-            tmp = []
-            for key in y_dic.keys():
-                if key in diag_agg_df.index:
-                    c = diag_agg_df.loc[key].diagnostic_subclass
-                    if str(c) != 'nan':
-                        tmp.append(c)
-            return list(set(tmp))
+def wvd_raw(x):
+        wvd = ch.WignerVilleDistribution(x,timestamps=np.arange(250)*0.01)
+        tfr_wvd, t_wvd, f_wvd = wvd.run()
+        #nếu có thể, t muốn pooling trước khi mình xử lí đống kia
+        return tfr_wvd
 
-        def aggregate_diagnostic(y_dic):
-            tmp = []
-            for key in y_dic.keys():
-                if key in diag_agg_df.index:
-                    c = diag_agg_df.loc[key].diagnostic_class
-                    if str(c) != 'nan':
-                        tmp.append(c)
-            return list(set(tmp))
+def fft_(x, axes = (2)):
+    return scp.fft.fftn(x, axes=axes)
 
-        diag_agg_df = aggregation_df[aggregation_df.diagnostic == 1.0]
-        if ctype == 'diagnostic':
-            df['diagnostic'] = df.scp_codes.apply(aggregate_all_diagnostic)
-            df['diagnostic_len'] = df.diagnostic.apply(lambda x: len(x))
-        elif ctype == 'subdiagnostic':
-            df['subdiagnostic'] = df.scp_codes.apply(aggregate_subdiagnostic)
-            df['subdiagnostic_len'] = df.subdiagnostic.apply(lambda x: len(x))
-        elif ctype == 'superdiagnostic':
-            df['superdiagnostic'] = df.scp_codes.apply(aggregate_diagnostic)
-            df['superdiagnostic_len'] = df.superdiagnostic.apply(lambda x: len(x))
-    elif ctype == 'form':
-        form_agg_df = aggregation_df[aggregation_df.form == 1.0]
-
-        def aggregate_form(y_dic):
-            tmp = []
-            for key in y_dic.keys():
-                if key in form_agg_df.index:
-                    c = key
-                    if str(c) != 'nan':
-                        tmp.append(c)
-            return list(set(tmp))
-
-        df['form'] = df.scp_codes.apply(aggregate_form)
-        df['form_len'] = df.form.apply(lambda x: len(x))
-    elif ctype == 'rhythm':
-        rhythm_agg_df = aggregation_df[aggregation_df.rhythm == 1.0]
-
-        def aggregate_rhythm(y_dic):
-            tmp = []
-            for key in y_dic.keys():
-                if key in rhythm_agg_df.index:
-                    c = key
-                    if str(c) != 'nan':
-                        tmp.append(c)
-            return list(set(tmp))
-
-        df['rhythm'] = df.scp_codes.apply(aggregate_rhythm)
-        df['rhythm_len'] = df.rhythm.apply(lambda x: len(x))
-    elif ctype == 'all':
-        df['all_scp'] = df.scp_codes.apply(lambda x: list(set(x.keys())))
-
-    return df
-
-def select_data(XX,YY, ctype, min_samples, outputfolder):
-    # convert multilabel to multi-hot
-    mlb = MultiLabelBinarizer()
-
-    if ctype == 'diagnostic':
-        X = XX[YY.diagnostic_len > 0]
-        Y = YY[YY.diagnostic_len > 0]
-        mlb.fit(Y.diagnostic.values)
-        y = mlb.transform(Y.diagnostic.values)
-        meta = get_metadata(YY)
-        meta = meta[YY.diagnostic_len > 0]
-    elif ctype == 'subdiagnostic':
-        counts = pd.Series(np.concatenate(YY.subdiagnostic.values)).value_counts()
-        counts = counts[counts > min_samples]
-        YY.subdiagnostic = YY.subdiagnostic.apply(lambda x: list(set(x).intersection(set(counts.index.values))))
-        YY['subdiagnostic_len'] = YY.subdiagnostic.apply(lambda x: len(x))
-        X = XX[YY.subdiagnostic_len > 0]
-        Y = YY[YY.subdiagnostic_len > 0]
-        mlb.fit(Y.subdiagnostic.values)
-        y = mlb.transform(Y.subdiagnostic.values)
-        meta = get_metadata(YY)
-        meta = meta[YY.subdiagnostic_len > 0]
-    elif ctype == 'superdiagnostic':
-        counts = pd.Series(np.concatenate(YY.superdiagnostic.values)).value_counts()
-        counts = counts[counts > min_samples]
-        YY.superdiagnostic = YY.superdiagnostic.apply(lambda x: list(set(x).intersection(set(counts.index.values))))
-        YY['superdiagnostic_len'] = YY.superdiagnostic.apply(lambda x: len(x))
-        X = XX[YY.superdiagnostic_len > 0]
-        Y = YY[YY.superdiagnostic_len > 0]
-        mlb.fit(Y.superdiagnostic.values)
-        y = mlb.transform(Y.superdiagnostic.values)
-        meta = get_metadata(YY)
-        meta = meta[YY.superdiagnostic_len > 0]
-    elif ctype == 'form':
-        # filter
-        counts = pd.Series(np.concatenate(YY.form.values)).value_counts()
-        counts = counts[counts > min_samples]
-        YY.form = YY.form.apply(lambda x: list(set(x).intersection(set(counts.index.values))))
-        YY['form_len'] = YY.form.apply(lambda x: len(x))
-        # select
-        X = XX[YY.form_len > 0]
-        Y = YY[YY.form_len > 0]
-        mlb.fit(Y.form.values)
-        y = mlb.transform(Y.form.values)
-        meta = get_metadata(YY)
-        meta = meta[YY.form_len > 0]
-    elif ctype == 'rhythm':
-        # filter 
-        counts = pd.Series(np.concatenate(YY.rhythm.values)).value_counts()
-        counts = counts[counts > min_samples]
-        YY.rhythm = YY.rhythm.apply(lambda x: list(set(x).intersection(set(counts.index.values))))
-        YY['rhythm_len'] = YY.rhythm.apply(lambda x: len(x))
-        # select
-        X = XX[YY.rhythm_len > 0]
-        Y = YY[YY.rhythm_len > 0]
-        mlb.fit(Y.rhythm.values)
-        y = mlb.transform(Y.rhythm.values)
-        meta = get_metadata(YY)
-        meta = meta[YY.rhythm_len > 0]
-    elif ctype == 'all':
-        # filter 
-        counts = pd.Series(np.concatenate(YY.all_scp.values)).value_counts()
-        counts = counts[counts > min_samples]
-        YY.all_scp = YY.all_scp.apply(lambda x: list(set(x).intersection(set(counts.index.values))))
-        YY['all_scp_len'] = YY.all_scp.apply(lambda x: len(x))
-        # select
-        X = XX[YY.all_scp_len > 0]
-        Y = YY[YY.all_scp_len > 0]
-        mlb.fit(Y.all_scp.values)
-        y = mlb.transform(Y.all_scp.values)
-        meta = get_metadata(YY)
-        meta = meta[YY.all_scp_len > 0]
-    else:
-        pass
-
-    # save LabelBinarizer
-    # with open(outputfolder+'mlb.pkl', 'wb') as tokenizer:
-    #     pickle.dump(mlb, tokenizer)
-
-    return X, Y, y, mlb, meta
-
-def preprocess_signals(X_train, X_validation, X_test, outputfolder):
-    # Standardize data such that mean 0 and variance 1
-    ss = StandardScaler()
-    ss.fit(np.vstack(X_train).flatten()[:,np.newaxis].astype(float))
+# def stft_data(xtrain, xval, xtest, nperseg = 40, rgb=False):
+#     shape = (21,14)
+#     if not rgb:
+#         stft_train = np.zeros((xtrain.shape[0], xtrain.shape[1], shape[0], shape[1]))
+#         stft_val = np.zeros((xval.shape[0], xval.shape[1], shape[0], shape[1]))
+#         stft_test = np.zeros((xtest.shape[0], xtest.shape[1], shape[0], shape[1]))
+#         for i in range(xtrain.shape[0]):
+#             for j in range(3):
+#                 stft_train[i][j] = stft_(xtrain[i][j],rgb=rgb,nperseg=nperseg)
+#         for i in range(xval.shape[0]):
+#             for j in range(3):
+#                 stft_val[i][j] = stft_(xval[i][j],rgb=rgb,nperseg=nperseg)
+#         for i in range(xtest.shape[0]):
+#             for j in range(3):
+#                 stft_test[i][j] = stft_(xtest[i][j],rgb=rgb,nperseg=nperseg)
     
-    # Save Standardizer data
-    # with open(outputfolder+'standard_scaler.pkl', 'wb') as ss_file:
-    #     pickle.dump(ss, ss_file)
+#     elif rgb:
+#         stft_train = np.zeros((xtrain.shape[0], 3*xtrain.shape[1], shape[0], shape[1]))
+#         stft_val = np.zeros((xval.shape[0], 3*xval.shape[1], shape[0], shape[1]))
+#         stft_test = np.zeros((xtest.shape[0], 3*xtest.shape[1], shape[0], shape[1]))
+#         for i in range(xtrain.shape[0]):
+#             for j in range(3):
+#                 stft_train[i][3*j:3*j+3] = stft_(xtrain[i][j],rgb=rgb,nperseg=nperseg)
+#         for i in range(xval.shape[0]):
+#             for j in range(3):
+#                 stft_val[i][3*j:3*j+3] = stft_(xval[i][j],rgb=rgb,nperseg=nperseg)
+#         for i in range(xtest.shape[0]):
+#             for j in range(3):
+#                 stft_test[i][3*j:3*j+3] = stft_(xtest[i][j],rgb=rgb,nperseg=nperseg)
+#         #ha, hope this works
+#     np.save("stft_train",stft_train), np.save("stft_val",stft_val), np.save("stft_test",stft_test)
+#     print("stft done")
 
-    return apply_standardizer(X_train, ss), apply_standardizer(X_validation, ss), apply_standardizer(X_test, ss)
+# def cwt_data(xtrain, xval, xtest,f_min=1,f_max=47,size = (224,224),start=0,finish=500,rgb = False):
+#     rgb = False
+#     if not rgb:
+#         cwt_train = np.ndarray((xtrain.shape[0], xtrain.shape[1], size[0], size[1]))
+#         cwt_val =   np.ndarray((xval.shape[0],   xval.shape[1],   size[0], size[1]))
+#         cwt_test =  np.ndarray((xtest.shape[0],  xtest.shape[1],  size[0], size[1]))
+#         for i in range(xtrain.shape[0]):
+#             for j in range(3):
+#                 cwt_train[i][j] = cwt_gray(xtrain[i][j],f_min,f_max,size,start,finish,rgb=rgb)
+#         for i in range(xval.shape[0]):
+#             for j in range(3):
+#                 cwt_val[i][j] = cwt_gray(xval[i][j],f_min,f_max,size,start,finish,rgb=rgb)
+#         for i in range(xtest.shape[0]):
+#             for j in range(3):
+#                 cwt_test[i][j] = cwt_gray(xtest[i][j],f_min,f_max,size,start,finish,rgb=rgb)
+#     elif rgb:
+#         cwt_train = np.ndarray((xtrain.shape[0], 3*xtrain.shape[1], size[0], size[1]))
+#         cwt_val =   np.ndarray((xval.shape[0],   3*xval.shape[1],   size[0], size[1]))
+#         cwt_test =  np.ndarray((xtest.shape[0],  3*xtest.shape[1],  size[0], size[1]))
+#         for i in range(xtrain.shape[0]):
+#             for j in range(3):
+#                 cwt_train[i][3*j:3*j+3] = cwt_gray(xtrain[i][j],f_min,f_max,size,start,finish,rgb=rgb)
+#         for i in range(xval.shape[0]):
+#             for j in range(3):
+#                 cwt_val[i][3*j:3*j+3] = cwt_gray(xval[i][j],f_min,f_max,size,start,finish,rgb=rgb)
+#         for i in range(xtest.shape[0]):
+#             for j in range(3):
+#                 cwt_test[i][3*j:3*j+3] = cwt_gray(xtest[i][j],f_min,f_max,size,start,finish,rgb=rgb)        
+#     np.save("cwt_train",cwt_train), np.save("cwt_val",cwt_val), np.save("cwt_test",cwt_test)
+#     print(cwt_train.shape)
+#     print("cwt done")
 
-def apply_standardizer(X, ss):
-    X_tmp = []
-    for x in X:
-        x_shape = x.shape
-        X_tmp.append(ss.transform(x.flatten()[:,np.newaxis]).reshape(x_shape))
-    X_tmp = np.array(X_tmp)
-    return X_tmp
+def cwt_data_scipy(xtrain, xval, xtest, widths = np.arange(1,61), size = (60,1000)):
+    cwt_train = np.ndarray((xtrain.shape[0], xtrain.shape[1], size[0], size[1]))
+    cwt_val =   np.ndarray((xval.shape[0],   xval.shape[1],   size[0], size[1]))
+    cwt_test =  np.ndarray((xtest.shape[0],  xtest.shape[1],  size[0], size[1]))
+    for i in range(xtrain.shape[0]):
+        for j in range(12):
+            cwt_train[i][j] = _cwt_scipy(xtrain[i][j],widths)
+    for i in range(xval.shape[0]):
+        for j in range(12):
+            cwt_val[i][j] = _cwt_scipy(xval[i][j],widths)
+    for i in range(xtest.shape[0]):
+        for j in range(12):
+            cwt_test[i][j] = _cwt_scipy(xtest[i][j],widths)
+    np.save("cwt_train_ricker_t",cwt_train), np.save("cwt_val_ricker_t",cwt_val), np.save("cwt_test_ricker_t",cwt_test)
+    print("cwt done")
 
-def get_metadata(csv_file):
-    #this is for computing the soft_label_encoding
-    meta_sle = np.full((21799,32),0.1)
-    meta_sle[csv_file.sex==1,0] = 1
-    meta_sle[csv_file.sex==0,1] = 1
-    for i in range(10):
-        meta_sle[np.logical_and(np.array(csv_file.height)>=(100+10*i), np.array(csv_file.height)<(110+10*i)), 2+i] = 1 #height encoding
-        meta_sle[np.logical_and(np.array(csv_file.weight)>=(0+12*i), np.array(csv_file.weight)<(12+12*i)), 12+i] = 1 #weight encoding
-        meta_sle[np.logical_and(np.array(csv_file.age)>=(0+10*i), np.array(csv_file.age)<(10+10*i)), 22+i] = 1 #age encoding
-    meta_sle[csv_file.age == 300, 31] = 1
+def wvd_data(xtrain, xval, xtest):
+    wvd_train = np.zeros((xtrain.shape[0], xtrain.shape[1], 250, 250))
+    wvd_val =   np.zeros((xval.shape[0], xval.shape[1], 250, 250))
+    wvd_test =  np.zeros((xtest.shape[0], xtest.shape[1], 250, 250))
+    for i in range(xtrain.shape[0]):
+        for j in range(12):
+            wvd_train[i][j] = wvd_raw(xtrain[i][j])
+    for i in range(xval.shape[0]):
+        for j in range(12):
+            wvd_val[i][j] = wvd_raw(xval[i][j])
+    for i in range(xtest.shape[0]):
+        for j in range(12):
+            wvd_test[i][j] = wvd_raw(xtest[i][j])
+    np.save("wvd_train",wvd_train), np.save("wvd_val",wvd_val), np.save("wvd_test",wvd_test)
+    print("wvd done")
 
-    def check_not_empty(metadata):
-            bool1 = 1 in metadata[2:11]
-            bool2 = 1 in metadata[12:21]
-            return [bool1, bool2]
+def dwt_data(xtrain, xval, xtest, wavelet = "haar", mode = "cpd"):
+    coeffs_train = []
+    coeffs_val = []
+    coeffs_test = []
+    for i in range(xtrain.shape[0]):
+        coeff = dwt_(xtrain[i], wavelet, mode)
+        coeffs_train.append(coeff)
+    for i in range(xval.shape[0]):
+        coeff = dwt_(xval[i], wavelet, mode)
+        coeffs_val.append(coeff)
+    for i in range(xtest.shape[0]):
+        coeff = dwt_(xtest[i], wavelet, mode)
+        coeffs_test.append(coeff)
+    np.save("dwt_train",coeffs_train), np.save("dwt_val",coeffs_val), np.save("dwt_test",coeffs_test)
+    print("dwt done")
 
-    def fill_noise(metadata):
-            bool = check_not_empty(metadata)
-            male_height =   [0,7,7,7,7,7,7,7,7,7]
-            female_height = [1,6,6,6,6,6,6,6,6,5]
-            male_weight =   [1,6,6,6,6,6,6,6,5,5]
-            female_weight = [1,5,5,5,5,5,5,5,4,4]
-            if not bool[0]:
-                if metadata[0] == 1:
-                    l = female_height
-                else: l = male_height
-                for i in range(22,32):
-                    if metadata[i] == 1:
-                        break
-                metadata[l[i-22]+2] = 1
-            if not bool[1]:
-                if metadata[0] == 1:
-                    l2 = female_weight
-                else: l2 = male_weight
-                for j in range(22,32): #age indicator
-                    if metadata[j] == 1:
-                        break
-                metadata[l2[j-22]+12] = 1
-            return metadata   
-    
-    for i in range(21430):
-            meta_sle[i] = fill_noise(meta_sle[i])
-    return meta_sle
+def fft_data(xtrain, xval, xtest):
+    np.save("fft_train",fft_(xtrain)), np.save("fft_val",fft_(xval)), np.save("fft_test",fft_(xtest))
+    print("fft done")
 
-sampling_frequency=100
-datafolder=''
-task='superdiagnostic' #thay các thứ ở đây để nó ngon hơn
-outputfolder='../output/' #không có cái outputfolder nào đâu, đống dùng đến nó t comment out hết rồi
-
-# Load PTB-XL data
-data, raw_labels = load_dataset(datafolder, sampling_frequency)
-# Preprocess label data
-labels = compute_label_aggregations(raw_labels, datafolder, task)
-# Select relevant data and convert to one-hot
-data, labels, Y, _, metadata = select_data(data, labels, task, min_samples=0, outputfolder=outputfolder)
-
-# 1-9 for training 
-X_train = data[labels.strat_fold < 10]
-y_train = Y[labels.strat_fold < 10]
-metadata_train = metadata[labels.strat_fold < 10]
-# 10 for validation
-X_val = data[labels.strat_fold == 10]
-y_val = Y[labels.strat_fold == 10]
-metadata_val = metadata[labels.strat_fold == 10]
-
-num_classes = 5         # <=== number of classes in the finetuning dataset
-input_shape = [1000,3] # <=== shape of samples, [None, 12] in case of different lengths
+def segmentation(x,y,sle,n_part = 4):
+    assert 1000%n_part == 0, "n_part must be the divisor of squence length"
+    x_aug = np.split(x, n_part, axis = 2)
+    x_aug.pop(-1), x_aug.pop(0)
+    y_aug = []
+    sle_aug = []
+    for _ in range(n_part-2):    
+        y_aug.append(y)
+        sle_aug.append(sle)
+    return np.concatenate(x_aug,axis = 0), np.concatenate(y_aug,axis = 0), np.concatenate(sle_aug,axis = 0)
 
 
-print(X_train.shape, y_train.shape, X_val.shape, y_val.shape, metadata_train.shape, metadata_val.shape)
-np.save("X_train",X_train)
-np.save("X_val",X_val)
+# P = Preprocessing(sampling_rate=100,path=path)
+# xtrain,xval,xtest = P.get_data_x()
 
-np.save("ytrain",y_train)
-np.save("yval",y_val)
+xtrain = np.load("X_train_bandpass.npy")
+xval = np.load("X_val_bandpass.npy")
+xtest = np.load("X_test_bandpass.npy")
+print(xtrain.shape)
 
-np.save("sletrain",metadata_train)
-np.save("sleval",metadata_val)
+# xtrain = np.load("X_train.npy")
+# xval = np.load("X_val.npy")
+# xtest = np.load("X_test.npy")
 
-#đống này đều vẫn phải chuyển sang tensor nhé
-print("imdonesaving")
+# ytrain = np.load("ytrain.npy")
+# yval = np.load("yval.npy")
+# ytest = np.load("ytest.npy")
+
+# sletrain = np.load("sletrain.npy")
+# sleval = np.load("sleval.npy")
+# sletest = np.load("sletest.npy")
+
+
+# np.save("X_train",xtrain)
+# np.save("X_val",xval)
+# np.save("X_test",xtest)
+
+# ytrain,yval,ytest = P.get_data_y()
+# sletrain,sleval,sletest = P.get_data_metadata()
+
+# xtrain_bandpass = convert_bandpass(xtrain)
+# xtest_bandpass = convert_bandpass(xtest)
+# xval_bandpass = convert_bandpass(xval)
+
+# xtrain_bandpass, ytrain, sletrain = segmentation(xtrain, ytrain, sletrain)
+# xval_bandpass, yval, sleval = segmentation(xval, yval, sleval)
+# xtest_bandpass, ytest, sletest = segmentation(xtest, ytest, sletest)
+
+# print(xtrain_bandpass.shape)
+
+# np.save("X_train_bandpass",xtrain_bandpass)
+# np.save("X_val_bandpass",xval_bandpass)
+# np.save("X_test_bandpass",xtest_bandpass)
+
+# np.save("ytrain_t",ytrain), np.save("yval_t",yval), np.save("ytest_t",ytest)
+
+# np.save("sletrain_t",sletrain), np.save("sleval_t",sleval), np.save("sletest_t",sletest)
+
+# print("done")
+
+cwt_data_scipy(xtrain,xval,xtest)
+# stft_data(xtrain,xval,xtest)
+# dwt_data(xtrain,xval,xtest)
+# wvd_data(xtrain_bandpass,xval_bandpass,xtest_bandpass)
+# fft_data(xtrain,xval,xtest)
