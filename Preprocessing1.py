@@ -13,12 +13,13 @@ import io
 # import matplotlib.cm as cm
 import pywt
 from sklearn import preprocessing
+sampling_rate = 100
 def init_everything():
     def load_raw_data(df, sampling_rate, path):
         if sampling_rate == 100:
-            data = [wfdb.rdsamp(path+f,channels=[0,1,2]) for f in df.filename_lr]
+            data = [wfdb.rdsamp(path+f,channels=[0,1,2,3,4,5,6,7,8,9,10,11]) for f in df.filename_lr]
         else:
-            data = [wfdb.rdsamp(path+f,channels=[0,1,2]) for f in df.filename_hr]
+            data = [wfdb.rdsamp(path+f,channels=[0,1,2,3,4,5,6,7,8,9,10,11]) for f in df.filename_hr]
         data = np.array([signal for signal, meta in data])
         return data
 
@@ -52,17 +53,25 @@ def init_everything():
     test_fold = 10
 
     # Apply labels
-    experiment = 'diagnostic_superclass'
+    experiment = 'all'
     if experiment == 'diagnostic_superclass':
         Y['diagnostic_superclass'] = Y.scp_codes.apply(aggregate_diagnostic)
-        y_train = Y[np.where(Y.strat_fold <= 8)].diagnostic_superclass
-        y_val = Y[np.where(Y.strat_fold == 9)].diagnostic_superclass
-        y_test = Y[np.where(Y.strat_fold == test_fold)].diagnostic_superclass
+        y_train = Y[Y.strat_fold <= 8].diagnostic_superclass
+        y_val = Y[Y.strat_fold == 9].diagnostic_superclass
+        y_test = Y[Y.strat_fold == test_fold].diagnostic_superclass
     elif experiment == 'diagnostic_subclass':
         Y['diagnostic_subclass'] = Y.scp_codes.apply(aggregate_subdiagnostic)
-        y_train = Y[np.where(Y.strat_fold <= 8)].diagnostic_subclass
-        y_val = Y[np.where(Y.strat_fold == 9)].diagnostic_subclass
-        y_test = Y[np.where(Y.strat_fold == test_fold)].diagnostic_subclass
+        y_train = Y[Y.strat_fold <= 8].diagnostic_subclass
+        y_val = Y[Y.strat_fold == 9].diagnostic_subclass
+        y_test = Y[Y.strat_fold == test_fold].diagnostic_subclass
+    elif experiment == 'all':
+        Y['all_scp'] = Y.scp_codes.apply(lambda x: list(set(x.keys())))
+        counts = pd.Series(np.concatenate(Y.all_scp.values)).value_counts()
+        counts = counts[counts >= 0]
+        Y.all_scp = Y.all_scp.apply(lambda x: list(set(x).intersection(set(counts.index.values))))
+        y_train = Y[Y.strat_fold <= 8].all_scp
+        y_val = Y[Y.strat_fold == 9].all_scp
+        y_test = Y[Y.strat_fold == test_fold].all_scp
         
     X_train = X[np.where(Y.strat_fold <= 8)].transpose(0, 2, 1) 
     X_val = X[np.where(Y.strat_fold == 9)].transpose(0, 2, 1) 
@@ -74,16 +83,18 @@ def init_everything():
         mlb.fit([['CD','HYP','MI','NORM','STTC']])
     elif experiment == "diagnostic_subclass":
         mlb.fit([['_AVB','AMI','CLBBB','CRBBB','ILBBB','IMI','IRBBB','ISC_','ISCA','ISCI','IVCD','LAFB/LPFB','LAO/LAE','LMI','LVH','NORM','NST_','PMI','RAO/RAE','RVH','SEHYP','STTC','WPW']])
+    elif experiment == 'all':
+        mlb.fit(Y.all_scp.values)
     y_train = mlb.transform(y_train)
     y_val = mlb.transform(y_val)
     y_test = mlb.transform(y_test)
-
+    print(y_train.shape)
     #remove zeros labels
     remove_zeros = True
     if remove_zeros:
         a = []
         for y in y_train:
-            if len(y) == 0:
+            if sum(y) == 0:
                 a.append(False)
             else:
                 a.append(True)
@@ -92,7 +103,7 @@ def init_everything():
 
         a = []
         for y in y_val:
-            if len(y) == 0:
+            if sum(y) == 0:
                 a.append(False)
             else:
                 a.append(True)
@@ -101,7 +112,7 @@ def init_everything():
 
         a = []
         for y in y_test:
-            if len(y) == 0:
+            if sum(y) == 0:
                 a.append(False)
             else:
                 a.append(True)
@@ -111,22 +122,23 @@ def init_everything():
     # Apply bandpass filter
 
     # saving the data
+    np.save("X_train", X_train)
+    np.save("X_val",   X_val)
+    np.save("X_test",  X_test)
     if experiment == "diagnostic_superclass":
-        np.save("X_super_train", x_train)
-        np.save("X_super_val",   x_val)
-        np.save("X_super_test",  x_test)
         np.save("y_super_train", y_train)
         np.save("y_super_val",   y_val)
         np.save("y_super_test",  y_test)
     elif experiment == "diagnostic_subclass":
-        np.save("X_sub_train", x_train)
-        np.save("X_sub_val",   x_val)
-        np.save("X_sub_test",  x_test)
         np.save("y_sub_train", y_train)
         np.save("y_sub_val",   y_val)
         np.save("y_sub_test",  y_test)
+    elif experiment == 'all':
+        np.save("y_all_train", y_train)
+        np.save("y_all_val",   y_val)
+        np.save("y_all_test",  y_test)
     
-    return x_train, x_val, x_test
+    return X_train, X_val, X_test
 
 xtrain,xval,xtest = init_everything()
 print(xtrain.shape,xval.shape,xtest.shape)
@@ -202,11 +214,11 @@ def dwt_(x, wavelet = "db1", mode = "cpd"):
     cD = np.squeeze(cD) 
     return np.concatenate((cA,cD), axis = 1)
 
-def wvd_raw(x):
-        wvd = ch.WignerVilleDistribution(x,timestamps=np.arange(250)*0.01)
-        tfr_wvd, t_wvd, f_wvd = wvd.run()
-        #nếu có thể, t muốn pooling trước khi mình xử lí đống kia
-        return tfr_wvd
+# def wvd_raw(x):
+#         wvd = ch.WignerVilleDistribution(x,timestamps=np.arange(250)*0.01)
+#         tfr_wvd, t_wvd, f_wvd = wvd.run()
+#         #nếu có thể, t muốn pooling trước khi mình xử lí đống kia
+#         return tfr_wvd
 
 def fft_(x, axes = (2)):
     return scp.fft.fftn(x, axes=axes)
@@ -276,7 +288,7 @@ def fft_(x, axes = (2)):
 #     print(cwt_train.shape)
 #     print("cwt done")
 
-def cwt_data_scipy(xtrain, xval, xtest, widths = np.arange(1,61), size = (60,1000)):
+def cwt_data_scipy(xtrain, xval, xtest, widths = np.arange(1,31), size = (30,1000)):
     cwt_train = np.ndarray((xtrain.shape[0], xtrain.shape[1], size[0], size[1]))
     cwt_val =   np.ndarray((xval.shape[0],   xval.shape[1],   size[0], size[1]))
     cwt_test =  np.ndarray((xtest.shape[0],  xtest.shape[1],  size[0], size[1]))
@@ -292,21 +304,21 @@ def cwt_data_scipy(xtrain, xval, xtest, widths = np.arange(1,61), size = (60,100
     np.save("cwt_train_ricker_t",cwt_train), np.save("cwt_val_ricker_t",cwt_val), np.save("cwt_test_ricker_t",cwt_test)
     print("cwt done")
 
-def wvd_data(xtrain, xval, xtest):
-    wvd_train = np.zeros((xtrain.shape[0], xtrain.shape[1], 250, 250))
-    wvd_val =   np.zeros((xval.shape[0], xval.shape[1], 250, 250))
-    wvd_test =  np.zeros((xtest.shape[0], xtest.shape[1], 250, 250))
-    for i in range(xtrain.shape[0]):
-        for j in range(12):
-            wvd_train[i][j] = wvd_raw(xtrain[i][j])
-    for i in range(xval.shape[0]):
-        for j in range(12):
-            wvd_val[i][j] = wvd_raw(xval[i][j])
-    for i in range(xtest.shape[0]):
-        for j in range(12):
-            wvd_test[i][j] = wvd_raw(xtest[i][j])
-    np.save("wvd_train",wvd_train), np.save("wvd_val",wvd_val), np.save("wvd_test",wvd_test)
-    print("wvd done")
+# def wvd_data(xtrain, xval, xtest):
+#     wvd_train = np.zeros((xtrain.shape[0], xtrain.shape[1], 250, 250))
+#     wvd_val =   np.zeros((xval.shape[0], xval.shape[1], 250, 250))
+#     wvd_test =  np.zeros((xtest.shape[0], xtest.shape[1], 250, 250))
+#     for i in range(xtrain.shape[0]):
+#         for j in range(12):
+#             wvd_train[i][j] = wvd_raw(xtrain[i][j])
+#     for i in range(xval.shape[0]):
+#         for j in range(12):
+#             wvd_val[i][j] = wvd_raw(xval[i][j])
+#     for i in range(xtest.shape[0]):
+#         for j in range(12):
+#             wvd_test[i][j] = wvd_raw(xtest[i][j])
+#     np.save("wvd_train",wvd_train), np.save("wvd_val",wvd_val), np.save("wvd_test",wvd_test)
+#     print("wvd done")
 
 def dwt_data(xtrain, xval, xtest, wavelet = "haar", mode = "cpd"):
     coeffs_train = []
@@ -340,8 +352,8 @@ def segmentation(x,y,sle,n_part = 4):
     return np.concatenate(x_aug,axis = 0), np.concatenate(y_aug,axis = 0), np.concatenate(sle_aug,axis = 0)
 
 
-# P = Preprocessing(sampling_rate=100,path=path)
-# xtrain,xval,xtest = P.get_data_x()
+# xtrain,xval,xtest = init_everything()
+# print(xtrain.shape,xval.shape,xtest.shape)
 
 xtrain = np.load("X_train_bandpass.npy")
 xval = np.load("X_val_bandpass.npy")
@@ -388,7 +400,8 @@ print(xtrain.shape)
 
 # print("done")
 
-cwt_data_scipy(xtrain,xval,xtest)
+# print("cwt-ing")
+# cwt_data_scipy(xtrain,xval,xtest)
 # stft_data(xtrain,xval,xtest)
 # dwt_data(xtrain,xval,xtest)
 # wvd_data(xtrain_bandpass,xval_bandpass,xtest_bandpass)
