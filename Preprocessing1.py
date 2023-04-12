@@ -47,13 +47,19 @@ def init_everything():
         tmp = []
         for key in y_dic.keys():
             if key in self.agg_df.index:
-                tmp.append(self.agg_df.loc[key].diagnostic_subclass)
+                tmp.append(agg_df.loc[key].diagnostic_subclass)
+        return list(set(tmp))
+    def aggregate_all_diagnostic(y_dic):
+        tmp = []
+        for key in y_dic.keys():
+            if key in agg_df.index:
+                tmp.append(key)
         return list(set(tmp))
     val_fold = 9
     test_fold = 10
 
     # Apply labels
-    experiment = 'all'
+    experiment = 'diag'
     if experiment == 'diagnostic_superclass':
         Y['diagnostic_superclass'] = Y.scp_codes.apply(aggregate_diagnostic)
         y_train = Y[Y.strat_fold <= 8].diagnostic_superclass
@@ -72,6 +78,11 @@ def init_everything():
         y_train = Y[Y.strat_fold <= 8].all_scp
         y_val = Y[Y.strat_fold == 9].all_scp
         y_test = Y[Y.strat_fold == test_fold].all_scp
+    elif experiment == 'diag':
+        Y['diagnostic'] = Y.scp_codes.apply(aggregate_all_diagnostic)
+        y_train = Y[Y.strat_fold <= 8].diagnostic
+        y_val = Y[Y.strat_fold == 9].diagnostic
+        y_test = Y[Y.strat_fold == test_fold].diagnostic
         
     X_train = X[np.where(Y.strat_fold <= 8)].transpose(0, 2, 1) 
     X_val = X[np.where(Y.strat_fold == 9)].transpose(0, 2, 1) 
@@ -85,10 +96,11 @@ def init_everything():
         mlb.fit([['_AVB','AMI','CLBBB','CRBBB','ILBBB','IMI','IRBBB','ISC_','ISCA','ISCI','IVCD','LAFB/LPFB','LAO/LAE','LMI','LVH','NORM','NST_','PMI','RAO/RAE','RVH','SEHYP','STTC','WPW']])
     elif experiment == 'all':
         mlb.fit(Y.all_scp.values)
+    elif experiment == 'diag':
+        mlb.fit(Y.diagnostic.values)
     y_train = mlb.transform(y_train)
     y_val = mlb.transform(y_val)
     y_test = mlb.transform(y_test)
-    print(y_train.shape)
     #remove zeros labels
     remove_zeros = True
     if remove_zeros:
@@ -100,7 +112,7 @@ def init_everything():
                 a.append(True)
         X_train = X_train[a]
         y_train = y_train[a]
-
+   
         a = []
         for y in y_val:
             if sum(y) == 0:
@@ -137,6 +149,10 @@ def init_everything():
         np.save("y_all_train", y_train)
         np.save("y_all_val",   y_val)
         np.save("y_all_test",  y_test)
+    elif experiment == 'diag':
+        np.save("y_diag_train", y_train)
+        np.save("y_diag_val",   y_val)
+        np.save("y_diag_test",  y_test)
     
     return X_train, X_val, X_test
 
