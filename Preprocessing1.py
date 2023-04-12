@@ -35,6 +35,8 @@ def init_everything():
 
     # Load scp_statements.csv for diagnostic aggregation
     agg_df = pd.read_csv(path+'scp_statements.csv', index_col=0)
+    rhythm_agg_df = agg_df[agg_df.rhythm == 1.0]
+    form_agg_df = agg_df[agg_df.form == 1.0]
     agg_df = agg_df[agg_df.diagnostic == 1]
 
     def aggregate_diagnostic(y_dic):
@@ -55,11 +57,27 @@ def init_everything():
             if key in agg_df.index:
                 tmp.append(key)
         return list(set(tmp))
+    def aggregate_form(y_dic):
+            tmp = []
+            for key in y_dic.keys():
+                if key in form_agg_df.index:
+                    c = key
+                    if str(c) != 'nan':
+                        tmp.append(c)
+            return list(set(tmp))
+    def aggregate_rhythm(y_dic):
+            tmp = []
+            for key in y_dic.keys():
+                if key in rhythm_agg_df.index:
+                    c = key
+                    if str(c) != 'nan':
+                        tmp.append(c)
+            return list(set(tmp))
     val_fold = 9
     test_fold = 10
 
     # Apply labels
-    experiment = 'diag'
+    experiment = 'rhythm'
     if experiment == 'diagnostic_superclass':
         Y['diagnostic_superclass'] = Y.scp_codes.apply(aggregate_diagnostic)
         y_train = Y[Y.strat_fold <= 8].diagnostic_superclass
@@ -83,6 +101,16 @@ def init_everything():
         y_train = Y[Y.strat_fold <= 8].diagnostic
         y_val = Y[Y.strat_fold == 9].diagnostic
         y_test = Y[Y.strat_fold == test_fold].diagnostic
+    elif experiment == 'form':
+        Y['form'] = Y.scp_codes.apply(aggregate_form)
+        y_train = Y[Y.strat_fold <= 8].form
+        y_val = Y[Y.strat_fold == 9].form
+        y_test = Y[Y.strat_fold == test_fold].form
+    elif experiment == 'rhythm':
+        Y['rhythm'] = Y.scp_codes.apply(aggregate_rhythm)
+        y_train = Y[Y.strat_fold <= 8].rhythm
+        y_val = Y[Y.strat_fold == 9].rhythm
+        y_test = Y[Y.strat_fold == test_fold].rhythm
         
     X_train = X[np.where(Y.strat_fold <= 8)].transpose(0, 2, 1) 
     X_val = X[np.where(Y.strat_fold == 9)].transpose(0, 2, 1) 
@@ -98,6 +126,10 @@ def init_everything():
         mlb.fit(Y.all_scp.values)
     elif experiment == 'diag':
         mlb.fit(Y.diagnostic.values)
+    elif experiment == 'form':
+        mlb.fit(Y.form.values)
+    elif experiment == 'rhythm':
+        mlb.fit(Y.rhythm.values)
     y_train = mlb.transform(y_train)
     y_val = mlb.transform(y_val)
     y_test = mlb.transform(y_test)
@@ -112,6 +144,7 @@ def init_everything():
                 a.append(True)
         X_train = X_train[a]
         y_train = y_train[a]
+        print(X_train.shape,y_train.shape)
    
         a = []
         for y in y_val:
@@ -153,6 +186,14 @@ def init_everything():
         np.save("y_diag_train", y_train)
         np.save("y_diag_val",   y_val)
         np.save("y_diag_test",  y_test)
+    elif experiment == 'form':
+        np.save("y_form_train", y_train)
+        np.save("y_form_val",   y_val)
+        np.save("y_form_test",  y_test)
+    elif experiment == 'rhythm':
+        np.save("y_rhythm_train", y_train)
+        np.save("y_rhythm_val",   y_val)
+        np.save("y_rhythm_test",  y_test)
     
     return X_train, X_val, X_test
 
@@ -371,9 +412,9 @@ def segmentation(x,y,sle,n_part = 4):
 # xtrain,xval,xtest = init_everything()
 # print(xtrain.shape,xval.shape,xtest.shape)
 
-xtrain = np.load("X_train_bandpass.npy")
-xval = np.load("X_val_bandpass.npy")
-xtest = np.load("X_test_bandpass.npy")
+# xtrain = np.load("X_train_bandpass.npy")
+# xval = np.load("X_val_bandpass.npy")
+# xtest = np.load("X_test_bandpass.npy")
 print(xtrain.shape)
 
 # xtrain = np.load("X_train.npy")
@@ -396,9 +437,9 @@ print(xtrain.shape)
 # ytrain,yval,ytest = P.get_data_y()
 # sletrain,sleval,sletest = P.get_data_metadata()
 
-# xtrain_bandpass = convert_bandpass(xtrain)
-# xtest_bandpass = convert_bandpass(xtest)
-# xval_bandpass = convert_bandpass(xval)
+xtrain_bandpass = convert_bandpass(xtrain)
+xtest_bandpass = convert_bandpass(xtest)
+xval_bandpass = convert_bandpass(xval)
 
 # xtrain_bandpass, ytrain, sletrain = segmentation(xtrain, ytrain, sletrain)
 # xval_bandpass, yval, sleval = segmentation(xval, yval, sleval)
@@ -406,9 +447,9 @@ print(xtrain.shape)
 
 # print(xtrain_bandpass.shape)
 
-# np.save("X_train_bandpass",xtrain_bandpass)
-# np.save("X_val_bandpass",xval_bandpass)
-# np.save("X_test_bandpass",xtest_bandpass)
+np.save("X_train_bandpass",xtrain_bandpass)
+np.save("X_val_bandpass",xval_bandpass)
+np.save("X_test_bandpass",xtest_bandpass)
 
 # np.save("ytrain_t",ytrain), np.save("yval_t",yval), np.save("ytest_t",ytest)
 
